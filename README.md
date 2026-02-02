@@ -252,6 +252,38 @@ You can now open **Netflix** safely.
 
 
 ---
+# Self-host mitmproxy with Docker
+
+## Requirements
+
+- [Docker Compose](https://docs.docker.com/compose/)
+
+## Installation & Usage
+
+Copy the `.env.example` to `.env`.
+
+```
+cp .env.example .env
+```
+
+Edit the `.env` and change the `IP_SCRIPT` variable to the IP of the device that will host mitmproxy. Optionally change `IP_SCRIPT_PORT` if `8080` is already used.
+
+```bash
+docker compose up -d
+```
+
+Check the logs to ensure the services are deployed successfully.
+
+```bash
+docker logs -f --tail 10 mitmproxy
+```
+
+```bash
+docker logs -f --tail 10 ws
+```
+
+Continue to the **Network / Proxy Setup** section.
+
 # How to run proxy locally
 
 ## Requirements

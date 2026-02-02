@@ -1,0 +1,24 @@
+services:
+  mitmproxy:
+    container_name: mitmproxy
+    build:
+      context: .
+      args:
+        - IP_SCRIPT=${IP_SCRIPT}
+        - IP_SCRIPT_PORT=${IP_SCRIPT_PORT}
+    ports:
+      - "${IP_SCRIPT_PORT}:8080"
+    stdin_open: true
+    tty: true
+    entrypoint: '/bin/sh -c "stty rows 24 cols 80 && mitmproxy -s /app/proxy.py"'
+    restart: unless-stopped
+  ws:
+    container_name: ws
+    build: .
+    ports:
+      - "1337:1337"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    depends_on:
+      - mitmproxy
