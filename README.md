@@ -345,15 +345,7 @@ Choose **Enter Manually**, Enter your SSID **Wi-Fi network name**. Set **Securit
 6. Press Done and wait for the connection to establish
 - You may see **Can't connect to the internet** — this is expected and can be ignored after pressing OK.
 
-7. Edit inject.js and inject_elfldr_automated.js:
-
-```
-const ip_script = "10.0.0.2"; // IP address of computer running mitmproxy.
-const ip_script_port = 8080; //port which mitmproxy is running on
-
-```
-
-> Make sure your PC running mitmproxy is on the same network and reachable at the IP you entered.
+> Make sure your PC running mitmproxy is on the same network and reachable at your local IP.
 
 ### Open Netflix and wait. 
 
