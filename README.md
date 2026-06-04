@@ -6,20 +6,20 @@ Inject custom JavaScript into the Netflix PS5 error screen by intercepting Netfl
 
 PS5 firmware version: 4.03-12.XX
 
-Lowest working version: https://prosperopatches.com/PPSA01614?v=05.000.000 (Needs to be properly merged) 
+Lowest working version: https://prosperopatches.com/PPSA01614?v=05.000.000 (Needs to be properly merged)
 
 **Recommended download link merged 6.00:** https://pkg-zone.com/details/PPSA01615
 
 > This project uses a local MITM proxy to inject and execute `inject.js` on the Netflix error page
 
 > [!IMPORTANT]
-> Jailbreaking or modifying your console falls outside the manufacturer’s intended use.  
+> Jailbreaking or modifying your console falls outside the manufacturer’s intended use.
 Any execution of unsigned or custom code is performed **solely at your own risk**.
 >
 > By using this project, you acknowledge that:
 >
-> - You assume full responsibility for any damage, data loss, or system instability.  
-> - The contributors and maintainers of this repository **cannot be held liable** for any issues arising from the use of this code or any related instructions.  
+> - You assume full responsibility for any damage, data loss, or system instability.
+> - The contributors and maintainers of this repository **cannot be held liable** for any issues arising from the use of this code or any related instructions.
 > - This project is provided **“as is”**, without warranty of any kind, express or implied.
 >
 > Proceed only if you understand and accept these risks.
@@ -28,7 +28,7 @@ Any execution of unsigned or custom code is performed **solely at your own risk*
 ---
 # Instructions
 
-### Extended Storage Setup 
+### Extended Storage Setup
 
 > [!WARNING]
 > This will wipe your drive.
@@ -93,7 +93,7 @@ If you don't know if you have the license, you can still try flashing the extend
 
 #### Step 5: Moving the Netflix App to Internal Storage
 1. Go to Settings -> Storage -> Extended Storage -> Applications  -> [Press Options on controller] -> Move To System Storage
-2. Press X on the Netflix App to tick and select it. 
+2. Press X on the Netflix App to tick and select it.
 3. Go to "Move" and press X.
 4. Press OK on the prompt to move the app to internal storage. It will then move to internal storage and be usable for the exploit. Accessible from the Media tab of the XMB.
 
@@ -130,7 +130,7 @@ If you don't know if you have the license, you can still try flashing the extend
 1. Go to Settings>Storage>USB Extended Storage>Games and Apps
 2. Press X to select the Netflix app.
 3. Go to "Select Items to Move" and press X.
-4. The Netflix app should be selected now go to "Move" and press X 
+4. The Netflix app should be selected now go to "Move" and press X
 5. Press OK on the prompt to move the app to internal storage. It will then move to internal storage and be usable for the exploit. Accessible from the Media tab of the XMB.
 
 
@@ -139,7 +139,7 @@ If you don't know if you have the license, you can still try flashing the extend
 #### Step 1: Download balenaEtcher
 - Download **balenaEtcher** for Windows, macOS, or Linux from:
   [https://etcher.balena.io](https://etcher.balena.io/#download-etcher)
-  
+
 #### Step 2: Download the Image Archive
 - Download the **`.7z` archive** for your desired capacity from the [**Releases** section.](https://github.com/earthonion/netflix-n-hack/releases)
   - NOTE: **Exact capacity matters for M.2 Images only** - not all 1TB drives are 1000GB: some are 1024GB, same with 2000/2048, 4000/4096; choose carefully!
@@ -326,9 +326,9 @@ python ws.py
 
 On your PS5:
 
-1. Go to Settings > Network > Settings > Set Up Internet Connection.  
+1. Go to Settings > Network > Settings > Set Up Internet Connection.
 
-2. Scroll to the bottom and select Set Up Manually.  
+2. Scroll to the bottom and select Set Up Manually.
 
 3. Choose Connection Type **Use Wi-Fi** or **Use a LAN Cable**
 If using **Wi-Fi**:
@@ -347,20 +347,49 @@ Choose **Enter Manually**, Enter your SSID **Wi-Fi network name**. Set **Securit
 
 > Make sure your PC running mitmproxy is on the same network and reachable at your local IP.
 
-### Open Netflix and wait. 
+### Open Netflix and wait.
 
 
 > [!NOTE]
-If you see elfldr listening on port 9021 you can send your elf payload. 
+If you see elfldr listening on port 9021 you can send your elf payload.
 
 ### if it fails reboot and try again
 
 ### Troubleshooting
-- If the Netflix application crashes shortly after opening it, reopen it to retry. 
-- If you see a green text error "Exception" press X or O to retry. 
+- If the Netflix application crashes shortly after opening it, reopen it to retry.
+- If you see a green text error "Exception" press X or O to retry.
 - If Lapse fails you will see a notification telling you to reboot the console, you must reboot to retry.
 
+### P2JB -> YTJB
+This method allows to use P2JB in Netflix app, which can be installed without restoring a backup, to install Youtube app which then can be used to run P2JB. The advantage of using Youtube for P2JB is better stability
+- start the proxy and ws python script for websocket logging
+- run the Netflix app and wait for remote_js_loader notofication
+- send p2jb payload to the remote JS loader, wait till complete
+```bash
+python payload_sender.py <IP_OF_YOUR_PS5> payloads/p2jb.js
+```
+Once complete, it will show "=== p2jb complete ===" and return to the JS loader
+- insert USB key with Youtube PKG and download0.dat
+- install youtube PKG via the debug menu
+- copy download0.dat using usb_copy payload (other files can be copied by editing usb_copy.js)
+```bash
+python payload_sender.py <IP_OF_YOUR_PS5> payloads/usb_copy.js
+```
 
+### P2JB -> elfldr
+Launching elfldr in Netflix app is currently unstable. Netflix app seems to have some sort of watchdog that kills it shortly after elfldr thread is created. elf_loader.js attempts to work around it by killing the Netflix app after a short timeout since elfldr thread is spawned. This seemed to work with lapse.js, so far I haven't been able to successfully run it on my firmware (10.20). Below are the steps:
+- start the proxy and ws python script for websocket logging
+- run the Netflix app and wait for remote_js_loader notofication
+- send p2jb payload to the remote JS loader, wait till complete
+```bash
+python payload_sender.py <IP_OF_YOUR_PS5> payloads/p2jb.js
+```
+Once complete, it will show "=== p2jb complete ===" and return to the JS loader
+- send elf_loader JS payload
+```bash
+python payload_sender.py <IP_OF_YOUR_PS5> payloads/elf_loader.js
+```
+- at this stage Netflix app will exit but the console should not crash. If port 9021 becomes reachable, it means that it worked
 
 ---
 
@@ -372,4 +401,4 @@ If you see elfldr listening on port 9021 you can send your elf payload.
 - [Gezine](https://github.com/gezine) for help with exploit/Y2JB for reference and original lapse.js!
 - Rush for creating system backup, 256GB and 2TB M.2 Images, PS4 Extended Storage Images and hours of testing!!
 - [Jester](https://github.com/god-jester) for testing 2TB and devising easiest imaging method, and gathering all images for m.2!
-- [TeRex777](https://x.com/TeRex777_) for PS5 App Extended Storage method. 
+- [TeRex777](https://x.com/TeRex777_) for PS5 App Extended Storage method.

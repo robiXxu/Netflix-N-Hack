@@ -9,7 +9,7 @@ def load_blocked_domains():
     """Load domains from hosts.txt file"""
     global BLOCKED_DOMAINS
     hosts_path = os.path.join(os.path.dirname(__file__), "hosts.txt")
-    
+
     try:
         with open(hosts_path, "r") as f:
             for line in f:
@@ -40,7 +40,7 @@ def is_blocked(hostname: str) -> bool:
 def tls_clienthello(data: tls.ClientHelloData) -> None:
     if data.context.server.address:
         hostname = data.context.server.address[0]
-        
+
         # Block domains at TLS layer
         if is_blocked(hostname):
             raise ConnectionRefusedError(f"[*] Blocked HTTPS connection to: {hostname}")
@@ -50,12 +50,12 @@ def request(flow: http.HTTPFlow) -> None:
     """Handle HTTP/HTTPS requests after TLS handshake"""
     hostname = flow.request.pretty_host
     proxyServerIP = flow.client_conn.sockname[0].encode("UTF-8")
-    
+
     # Special handling for Netflix - corrupt the response
     if "netflix" in hostname:
-        flow.response = http.Response.make( 
+        flow.response = http.Response.make(
             200,
-            b"uwu",  # probably don't need this many uwus. just corrupt the response 
+            b"uwu",  # probably don't need this many uwus. just corrupt the response
             {"Content-Type": "application/x-msl+json"}
         )
         print(f"[*] Corrupted Netflix response for: {hostname}")
@@ -63,117 +63,45 @@ def request(flow: http.HTTPFlow) -> None:
 
     # Block other domains from hosts.txt
     if is_blocked(hostname):
-        flow.response = http.Response.make( 
+        flow.response = http.Response.make(
             404,
             b"uwu",
         )
         print(f"[*] Blocked HTTP request to: {hostname}")
         return
 
-    # Map error text js to inject.js
-    if "/js/common/config/text/config.text.lruderrorpage" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "inject_elfldr_automated.js")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
+    BASE = os.path.dirname(__file__)
+    FILE_MAP = {
+        "/js/common/config/text/config.text.lruderrorpage": ("inject_elfldr_automated.js",   True),
+        "/js/lapse.js":                                     ("payloads/lapse.js",            True),
+        "/js/elf_loader.js":                                ("payloads/elf_loader.js",       True),
+        "/js/p2jb.js":                                      ("payloads/p2jb.js",             True),
+        "/js/remote_js_loader.js":                          ("payloads/remote_js_loader.js", True),
+        "/js/ps4/inject_auto_bundle.js":                    ("PS4/inject_auto_bundle.js",    True),
+        "/js/elfldr.elf":                                   ("payloads/elfldr.elf",          False),
+        "/js/elfldr-ps5.elf":                               ("payloads/elfldr-ps5.elf",      False),
+        "/js/kexp.bin":                                     ("payloads/kexp.bin",            False),
+    }
 
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read().replace(b"PLS_STOP_HARDCODING_IPS",proxyServerIP)
-                print(f"[+] Loaded {len(content)} bytes from inject.js")
+    for url_path, (file_path, replace_ip) in FILE_MAP.items():
+        if url_path in flow.request.path:
+            full_path = os.path.join(BASE, file_path)
+            print(f"[*] Serving {file_path}")
+            try:
+                with open(full_path, "rb") as f:
+                    content = f.read()
+                    if replace_ip:
+                        content = content.replace(b"PLS_STOP_HARDCODING_IPS", proxyServerIP)
+                    print(f"[+] Loaded {len(content)} bytes from {file_path}")
+                    flow.response = http.Response.make(
+                        200, content,
+                        {"Content-Type": "application/octet-stream"}
+                    )
+            except FileNotFoundError:
+                print(f"[!] ERROR: {file_path} not found at {full_path}")
                 flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
+                    404,
+                    f"File not found: {file_path}".encode(),
+                    {"Content-Type": "text/plain"}
                 )
-        except FileNotFoundError:
-            print(f"[!] ERROR: inject.js not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: inject.js",
-                {"Content-Type": "text/plain"}
-            )
-
-    
-    if "/js/lapse.js" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "lapse.js")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
-
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read().replace(b"PLS_STOP_HARDCODING_IPS",proxyServerIP)
-                print(f"[+] Loaded {len(content)} bytes from lapse.js")
-                flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
-                )
-        except FileNotFoundError:
-            print(f"[!] ERROR: lapse.js not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: 1_lapse_prepare_1.js",
-                {"Content-Type": "text/plain"}
-            )
-            
-    if "/js/elf_loader.js" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "elf_loader.js")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
-
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read().replace(b"PLS_STOP_HARDCODING_IPS",proxyServerIP)
-                print(f"[+] Loaded {len(content)} bytes from elf_loader.js")
-                flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
-                )
-        except FileNotFoundError:
-            print(f"[!] ERROR: lapse.js not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: elf_loader.js",
-                {"Content-Type": "text/plain"}
-            )
-    # Map elfldr.elf to elfldr.elf (binary)
-    if "/js/elfldr.elf" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "elfldr.elf")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
-
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read().replace(b"PLS_STOP_HARDCODING_IPS",proxyServerIP)
-                print(f"[+] Loaded {len(content)} bytes from elfldr.elf")
-                flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
-                )
-        except FileNotFoundError:
-            print(f"[!] ERROR: elfldr.elf not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: elfldr.elf",
-                {"Content-Type": "text/plain"}
-            )
-            
-            
-    if "/js/ps4/inject_auto_bundle.js" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "PS4", "inject_auto_bundle.js")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
-
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read().replace(b"PLS_STOP_HARDCODING_IPS",proxyServerIP)
-                print(f"[+] Loaded {len(content)} bytes from inject_auto_bundle.js")
-                flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
-                )
-        except FileNotFoundError:
-            print(f"[!] ERROR: inject_auto_bundle.js not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: inject_auto_bundle.js",
-                {"Content-Type": "text/plain"}
-            )
+            break
