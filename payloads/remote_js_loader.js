@@ -173,7 +173,6 @@
     }
 
     var exit_js_loader = false;
-
     while (!exit_js_loader) {
         try {
             logger.log("stage_remote_js_loader: awaiting connection at " + network_str);

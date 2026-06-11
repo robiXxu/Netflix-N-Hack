@@ -72,15 +72,15 @@ def request(flow: http.HTTPFlow) -> None:
 
     BASE = os.path.dirname(__file__)
     FILE_MAP = {
-        "/js/common/config/text/config.text.lruderrorpage": ("inject_elfldr_automated.js",   True),
-        "/js/lapse.js":                                     ("payloads/lapse.js",            True),
-        "/js/elf_loader.js":                                ("payloads/elf_loader.js",       True),
-        "/js/p2jb.js":                                      ("payloads/p2jb.js",             True),
-        "/js/remote_js_loader.js":                          ("payloads/remote_js_loader.js", True),
-        "/js/ps4/inject_auto_bundle.js":                    ("PS4/inject_auto_bundle.js",    True),
-        "/js/elfldr.elf":                                   ("payloads/elfldr.elf",          False),
-        "/js/elfldr-ps5.elf":                               ("payloads/elfldr-ps5.elf",      False),
-        "/js/kexp.bin":                                     ("payloads/kexp.bin",            False),
+        "/js/common/config/text/config.text.lruderrorpage": ("inject_elfldr_automated.js",    True),
+        "/js/lapse.js":                                     ("payloads/lapse.js",             True),
+        "/js/elf_loader.js":                                ("payloads/elf_loader.js",        True),
+        "/js/ps4/inject_auto_bundle.js":                    ("PS4/inject_auto_bundle.js",     True),
+        "/js/remote_js_loader.js":                          ("payloads/remote_js_loader.js",  True),
+        "/js/elfldr.elf":                                   ("payloads/elfldr.elf",           False),
+        "/js/p2jb.js":                                      ("payloads/p2jb.js",              True),
+        "/js/kexp_no_pthreads.bin":                         ("payloads/kexp_no_pthreads.bin", False),
+        "/js/elfldr-ps5.elf":                               ("payloads/elfldr-ps5.elf",       False),
     }
 
     for url_path, (file_path, replace_ip) in FILE_MAP.items():

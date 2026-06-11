@@ -360,36 +360,22 @@ If you see elfldr listening on port 9021 you can send your elf payload.
 - If you see a green text error "Exception" press X or O to retry.
 - If Lapse fails you will see a notification telling you to reboot the console, you must reboot to retry.
 
-### P2JB -> YTJB
-This method allows to use P2JB in Netflix app, which can be installed without restoring a backup, to install Youtube app which then can be used to run P2JB. The advantage of using Youtube for P2JB is better stability
-- start the proxy and ws python script for websocket logging
+### P2JB
+For PS5 firmwares between 10.x - 12.40 inclusive, an implementation of P2JB is available. This is a port of matem6/P2JB-Y2JB-Porting with changes requried by the NF app environment (use uncompressed reads/writes, avoid the use of pthread_create/scePthreadCreate, minimize garbage creation). According to my testing, the exploit is relatively stable on 2 cores but unstable on 3+.
+Instructions of running the P2JB implementation:
+- start the proxy in the same way as with the lapse variant, start ws.py script for websocket logging
 - run the Netflix app and wait for remote_js_loader notofication
 - send p2jb payload to the remote JS loader, wait till complete
 ```bash
 python payload_sender.py <IP_OF_YOUR_PS5> payloads/p2jb.js
 ```
-Once complete, it will show "=== p2jb complete ===" and return to the JS loader
-- insert USB key with Youtube PKG and download0.dat
-- install youtube PKG via the debug menu
-- copy download0.dat using usb_copy payload (other files can be copied by editing usb_copy.js)
-```bash
-python payload_sender.py <IP_OF_YOUR_PS5> payloads/usb_copy.js
-```
-
-### P2JB -> elfldr
-Launching elfldr in Netflix app is currently unstable. Netflix app seems to have some sort of watchdog that kills it shortly after elfldr thread is created. elf_loader.js attempts to work around it by killing the Netflix app after a short timeout since elfldr thread is spawned. This seemed to work with lapse.js, so far I haven't been able to successfully run it on my firmware (10.20). Below are the steps:
-- start the proxy and ws python script for websocket logging
-- run the Netflix app and wait for remote_js_loader notofication
-- send p2jb payload to the remote JS loader, wait till complete
-```bash
-python payload_sender.py <IP_OF_YOUR_PS5> payloads/p2jb.js
-```
-Once complete, it will show "=== p2jb complete ===" and return to the JS loader
-- send elf_loader JS payload
-```bash
-python payload_sender.py <IP_OF_YOUR_PS5> payloads/elf_loader.js
-```
-- at this stage Netflix app will exit but the console should not crash. If port 9021 becomes reachable, it means that it worked
+Once complete (ETA ~70min), it will launch elfldr via kexp on the usual port (9021) and return the control to remote_js_loader. At this point, Netflix app can be safely closed without crashing. Please note: a customized kexp (payloads/kexp_no_pthreads.bin_, that launches elfldr directly instead of using pthread_create, is used. This is because pthread_create crashes during TLS allocation on 10.x firmwares (and I presumably all higher versions).
+For disc-based PS5 users: elfldr can be used to (un)patch bdjstack.jar (see BD-UN-JB project) to provide a much faster JB method on supported firmwares)
+The jailbreak also enables the debug menu, which can be used to install Youtube app without restoring a backup (see Y2JB github repo for details and pkg & update files):
+- install YT pkg from USB using the debug men
+- launch YT app and close
+- copy download0.dat to the required location (e.g. by using ftpsrv payload injected via elfldr)
+- YT app should now be exploitable
 
 ---
 

