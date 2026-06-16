@@ -1795,4 +1795,5 @@ function main () {
     }
 }
 
-ws.init(ip_script, 1337, () => { logger.log("Websocket initiated successfully"); main();});
+//ws.init(ip_script, 1337, () => { logger.log("Websocket initiated successfully"); main();});// uncomment this to enable WebSocket logging
+main();
