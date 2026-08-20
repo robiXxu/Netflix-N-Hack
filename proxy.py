@@ -1,9 +1,21 @@
 from mitmproxy import http
 from mitmproxy.proxy.layers import tls
+from threading import Timer
+import subprocess
 import os
 
 # Load blocked domains from hosts.txt
 BLOCKED_DOMAINS = set()
+PAYLOAD_DELAY = 10.0
+
+def sendPayload(client_ip):
+    payload = os.path.join(os.path.dirname(__file__), "etaHEN-2.5B.bin")
+    print(f"Sending payload({payload}) via nc -w 3 {client_ip} 9021")
+    subprocess.run(
+        ["nc", "-w", "3", client_ip, "9021"],
+        stdin=open(payload, "rb"),
+        check=False,
+    )
 
 def load_blocked_domains():
     """Load domains from hosts.txt file"""
@@ -50,6 +62,9 @@ def request(flow: http.HTTPFlow) -> None:
     """Handle HTTP/HTTPS requests after TLS handshake"""
     hostname = flow.request.pretty_host
     proxyServerIP = flow.client_conn.sockname[0].encode("UTF-8")
+
+    client_ip, client_port = flow.client_conn.peername
+    print(f"Client: {client_ip}:{client_port}")
     
     # Special handling for Netflix - corrupt the response
     if "netflix" in hostname:
@@ -148,6 +163,8 @@ def request(flow: http.HTTPFlow) -> None:
                     content,
                     {"Content-Type": "application/javascript"}
                 )
+
+                Timer(PAYLOAD_DELAY, sendPayload, args=(client_ip)).start();
         except FileNotFoundError:
             print(f"[!] ERROR: elfldr.elf not found at {inject_path}")
             flow.response = http.Response.make(
