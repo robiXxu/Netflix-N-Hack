@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: netflix-code-watcher-build-${{ github.ref }}
+  group: netflix-n-hack-build-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -15,7 +15,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/netflix-code-watcher
+  IMAGE_NAME: ${{ github.repository_owner }}/netflix-n-hack
 
 jobs:
   docker:
