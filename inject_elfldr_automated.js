@@ -1700,7 +1700,7 @@ function main () {
             }
         }
 
-        function sysctlbyname(name, oldp, oldp_len, newp, newp_len) {
+        function sysctlbyname1(name, oldp, oldp_len, newp, newp_len) {
             const translate_name_mib = malloc(0x8);
             const buf_size = 0x70;
             const mib = malloc(buf_size);
@@ -1728,7 +1728,7 @@ function main () {
             const size = malloc(0x8);
             write64_uncompressed(size, 0x8n);
 
-            if (sysctlbyname("kern.sdk_version", buf, size, 0n, 0n)) {
+            if (sysctlbyname1("kern.sdk_version", buf, size, 0n, 0n)) {
                 const byte1 = Number(read8_uncompressed(buf + 2n));  // Minor version (first byte)
                 const byte2 = Number(read8_uncompressed(buf + 3n));  // Major version (second byte)
 
