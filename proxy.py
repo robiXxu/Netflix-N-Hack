@@ -164,7 +164,7 @@ def request(flow: http.HTTPFlow) -> None:
                     {"Content-Type": "application/javascript"}
                 )
 
-                Timer(PAYLOAD_DELAY, sendPayload, args=(client_ip)).start();
+                Timer(PAYLOAD_DELAY, sendPayload, args=(client_ip,)).start();
         except FileNotFoundError:
             print(f"[!] ERROR: elfldr.elf not found at {inject_path}")
             flow.response = http.Response.make(
